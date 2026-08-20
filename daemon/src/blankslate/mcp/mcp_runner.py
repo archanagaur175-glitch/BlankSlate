@@ -86,7 +86,9 @@ class McpRunner:
         if spec.url:
             session = Client(spec.url, **spec.client_kwargs)
         else:
-            params = StdioServerParameters(command=spec.command, args=spec.args, env=spec.env or None)
+            params = StdioServerParameters(
+                command=spec.command, args=spec.args, env=spec.env or None
+            )
             session = Client(params, **spec.client_kwargs)
         if hasattr(session, "initialize"):
             await session.initialize()
@@ -146,7 +148,9 @@ class McpRunner:
                         {
                             "name": getattr(tool, "name", ""),
                             "description": getattr(tool, "description", ""),
-                            "inputSchema": getattr(tool, "input_schema", getattr(tool, "inputSchema", {})),
+                            "inputSchema": getattr(
+                                tool, "input_schema", getattr(tool, "inputSchema", {})
+                            ),
                         }
                     )
             return cleaned

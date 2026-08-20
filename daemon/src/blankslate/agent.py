@@ -133,7 +133,11 @@ class Agent:
             assistant_msg: dict = {"role": "assistant", "content": result.content or ""}
             if result.tool_calls:
                 calls = [
-                    {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
+                    {
+                        "id": c.id,
+                        "type": "function",
+                        "function": {"name": c.name, "arguments": c.arguments},
+                    }
                     for c in result.tool_calls
                 ]
                 assistant_msg["tool_calls"] = calls

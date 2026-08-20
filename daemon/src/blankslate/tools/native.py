@@ -61,9 +61,7 @@ async def search_web(arguments: dict) -> str:
         from ddgs import DDGS
 
         async with DDGS() as ddgs:
-            results = await ddgs.atext(
-                query, max_results=int(arguments.get("max_results") or 5)
-            )
+            results = await ddgs.atext(query, max_results=int(arguments.get("max_results") or 5))
         if not results:
             return "No results found."
         lines = []
@@ -172,9 +170,7 @@ NATIVE_TOOLS: list[ToolSpec] = [
         description="Launch an application by path or command line",
         parameters={
             "type": "object",
-            "properties": {
-                "app": {"type": "string", "description": "exe path or command"}
-            },
+            "properties": {"app": {"type": "string", "description": "exe path or command"}},
             "required": ["app"],
             "additionalProperties": False,
         },

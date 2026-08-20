@@ -17,11 +17,15 @@ class _FakeSession:
         pass
 
     async def call_tool(self, request: dict) -> list:
-        return [{"type": "text", "text": f"{self.name}:{request['name']}:{request.get('arguments')}"}]
+        return [
+            {"type": "text", "text": f"{self.name}:{request['name']}:{request.get('arguments')}"}
+        ]
 
     async def list_tools(self, request: dict) -> object:
         class R:
-            tools = [{"name": "fake_read", "description": "reads", "inputSchema": {"type": "object"}}]
+            tools = [
+                {"name": "fake_read", "description": "reads", "inputSchema": {"type": "object"}}
+            ]
 
         return R()
 
@@ -90,7 +94,9 @@ async def _test_list_tools_conversion():
 
     runner._connect = factory
     tools = await runner.list_tools("srv")
-    assert tools == [{"name": "fake_read", "description": "reads", "inputSchema": {"type": "object"}}]
+    assert tools == [
+        {"name": "fake_read", "description": "reads", "inputSchema": {"type": "object"}}
+    ]
     await runner.aclose()
 
 

@@ -268,9 +268,7 @@ class DaemonApp:
             return
 
         intent = await self._judge.judge(text)
-        await self._ipc.broadcast(
-            {"type": "intent", **intent.to_dict(), "source_input": source}
-        )
+        await self._ipc.broadcast({"type": "intent", **intent.to_dict(), "source_input": source})
         if not intent.directed:
             return
 

@@ -58,9 +58,7 @@ class OllamaProvider(LLMProvider):
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
         try:
-            resp = await self._client.post(
-                f"{self.base_url}{_CHAT}", json=payload
-            )
+            resp = await self._client.post(f"{self.base_url}{_CHAT}", json=payload)
         except httpx.HTTPError as exc:
             raise LLMError(f"ollama request failed: {exc}") from exc
         if resp.status_code != 200:
@@ -70,7 +68,8 @@ class OllamaProvider(LLMProvider):
         content = message.get("content") or ""
         tool_calls = [
             LLMToolCall(
-                id=call.get("id") or "", name=call["function"]["name"],
+                id=call.get("id") or "",
+                name=call["function"]["name"],
                 arguments=_parse_arguments(call.get("function", {}).get("arguments", {})),
             )
             for call in (message.get("tool_calls") or [])

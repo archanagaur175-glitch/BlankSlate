@@ -95,7 +95,9 @@ def test_agent_empty_query(tmp_path):
 def test_agent_stops_after_max_iterations(tmp_path):
     class _CircularLlm:
         async def chat(self, messages, tools=None, temperature=0.3, max_tokens=None):
-            return LLMResult(tool_calls=[LLMToolCall(id="x", name="get_current_time", arguments={})])
+            return LLMResult(
+                tool_calls=[LLMToolCall(id="x", name="get_current_time", arguments={})]
+            )
 
     agent = Agent(
         llm=_CircularLlm(),
@@ -111,14 +113,18 @@ def test_agent_stops_after_max_iterations(tmp_path):
 def test_agent_mcp_tools(tmp_path):
     llm = _ScriptedLlm(
         [
-            LLMResult(tool_calls=[LLMToolCall(id="c", name="files__read_file", arguments={"p": "x"})]),
+            LLMResult(
+                tool_calls=[LLMToolCall(id="c", name="files__read_file", arguments={"p": "x"})]
+            ),
             LLMResult(content="read the file"),
         ]
     )
     events = []
 
     async def lister(server):
-        return [{"name": "read_file", "description": "read a file", "inputSchema": {"type": "object"}}]
+        return [
+            {"name": "read_file", "description": "read a file", "inputSchema": {"type": "object"}}
+        ]
 
     async def caller(server, tool, arguments):
         assert tool == "read_file"

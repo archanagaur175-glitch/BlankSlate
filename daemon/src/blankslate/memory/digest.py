@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 _SUMMARY_PROMPT = """Summarize the following conversation history into a short
 paragraph that preserves the user's intent, important facts, and any pending
-requests. Keep it under 100 words.""" 
+requests. Keep it under 100 words."""
 
 
 class Digester:
@@ -55,8 +55,6 @@ class Digester:
             return recent
         if not self.available:
             return older + recent
-        combined = "\n".join(
-            f"{m.get('role')}: {m.get('content')}" for m in older
-        )
+        combined = "\n".join(f"{m.get('role')}: {m.get('content')}" for m in older)
         summary = await self.digest(combined)
         return [{"role": "system", "content": f"Earlier context: {summary}"}] + recent

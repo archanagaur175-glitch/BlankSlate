@@ -110,7 +110,7 @@ class ToolRouter:
         catalog = "\n".join(f"- {t.name}: {t.description}" for t in tools)
         prompt = (
             f"Pick at most {self.top_k} tools from the catalog needed to handle this "
-            "request. Respond with ONLY JSON {\"tools\": [\"name1\", ...]}. "
+            'request. Respond with ONLY JSON {"tools": ["name1", ...]}. '
             f"Catalog:\n{catalog}\nRequest: {query}"
         )
         try:

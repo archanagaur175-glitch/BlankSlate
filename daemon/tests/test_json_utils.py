@@ -23,7 +23,7 @@ def test_extract_json_balanced_braces_in_strings():
 
 
 def test_extract_json_array():
-    assert extract_json('[1, 2, 3]') == [1, 2, 3]
+    assert extract_json("[1, 2, 3]") == [1, 2, 3]
 
 
 def test_extract_json_none_when_invalid():

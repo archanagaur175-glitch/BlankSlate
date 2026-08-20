@@ -72,7 +72,10 @@ class IntentJudge:
                 f"Utterance: {text}"
             )
             result = await self.llm.chat(
-                messages=[{"role": "system", "content": _JUDGE_SYSTEM}, {"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": _JUDGE_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.0,
             )
             parsed = extract_json(result.content)

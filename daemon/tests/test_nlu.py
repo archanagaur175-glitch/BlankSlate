@@ -50,7 +50,9 @@ class _FakeLlm:
 
 
 def test_llm_judge_directed():
-    judge = IntentJudge(llm=_FakeLlm('{"directed": true, "query": "open the browser"}'), wake_words=["hey jarvis"])
+    judge = IntentJudge(
+        llm=_FakeLlm('{"directed": true, "query": "open the browser"}'), wake_words=["hey jarvis"]
+    )
     intent = asyncio.run(judge.judge("hey jarvis open the browser"))
     assert intent.directed is True
     assert intent.query == "open the browser"
@@ -98,7 +100,9 @@ def test_planner_heuristic_split():
 
 
 def test_planner_llm_plan():
-    planner = TaskPlanner(llm=_FakeLlm('{"plan": ["open browser", "search docs"], "needs_tools": true}'))
+    planner = TaskPlanner(
+        llm=_FakeLlm('{"plan": ["open browser", "search docs"], "needs_tools": true}')
+    )
     plan = asyncio.run(planner.plan("open browser and search docs"))
     assert plan == ["open browser", "search docs"]
 
