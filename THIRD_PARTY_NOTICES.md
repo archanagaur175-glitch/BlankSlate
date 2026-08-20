@@ -60,6 +60,33 @@ bundled asset, its license, and any policy flags. It is maintained by
 | Kokoro voice | Apache-2.0 | hexgrad/Kokoro-82M |
 | Original HUD branding/icons/waveform | Apache-2.0 (ours) | assets/ |
 
+## HUD frontend dependencies (Node/npm, via pnpm)
+
+| Package | License | Notes |
+|---|---|---|
+| svelte | MIT | UI framework v5 |
+| vite | MIT | dev server + bundler |
+| @sveltejs/vite-plugin-svelte | MIT | |
+| svelte-check | MIT | typecheck |
+| typescript | Apache-2.0 | |
+| @tauri-apps/cli | Apache-2.0 OR MIT | build tooling |
+| @tauri-apps/api | Apache-2.0 OR MIT | invoke/event bindings |
+| @tsconfig/svelte | MIT | |
+
+## HUD Rust dependencies (cargo)
+
+| Crate | License | Notes |
+|---|---|---|
+| tauri, tauri-build | Apache-2.0 OR MIT | app framework v2; WebView2 runtime is a Windows component |
+| serde, serde_json | MIT OR Apache-2.0 | |
+| tokio | MIT | async runtime |
+| tokio-tungstenite | MIT OR Apache-2.0 | WebSocket client for the daemon bridge |
+| futures-util | MIT OR Apache-2.0 | |
+| url | MIT OR Apache-2.0 | |
+| dirs | MIT OR Apache-2.0 | LOCALEALAPPDATA resolution |
+| log, env_logger | MIT OR Apache-2.0 | |
+| window-vibrancy | Apache-2.0 OR MIT | mica/acrylic runtime effects |
+
 ## Explicitly excluded (design reference only)
 
 | Project | License | Reason |

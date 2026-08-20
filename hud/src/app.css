@@ -1,0 +1,54 @@
+:root {
+  --titlebar-h: 38px;
+  --radius: 14px;
+  --accent: #6c8cff;
+  --accent-soft: rgba(108, 140, 255, 0.22);
+  --danger: #ff6b6b;
+  --warn: #ffc46b;
+  --ok: #5fd0a0;
+}
+
+/* Light theme over mica/acrylic */
+html[data-theme="light"] {
+  --bg: rgba(248, 249, 253, 0.66);
+  --bg-elev: rgba(255, 255, 255, 0.72);
+  --fg: #1b1f2a;
+  --fg-muted: #5a6274;
+  --stroke: rgba(20, 24, 40, 0.12);
+  color-scheme: light;
+}
+
+/* Dark theme over mica/acrylic */
+html[data-theme="dark"] {
+  --bg: rgba(16, 18, 28, 0.66);
+  --bg-elev: rgba(28, 31, 44, 0.72);
+  --fg: #eef1f8;
+  --fg-muted: #a3a9ba;
+  --stroke: rgba(255, 255, 255, 0.12);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+button {
+  font-family: inherit;
+}
