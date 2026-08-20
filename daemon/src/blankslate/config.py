@@ -101,6 +101,22 @@ class ContextConfig(_Settings):
 
 
 @dataclass
+class AgentsConfig(_Settings):
+    enabled: bool = True
+    max_iterations: int = 6
+    temperature: float = 0.3
+    system_prompt: str = (
+        "You are BlankSlate, a private, local-first voice assistant. Be concise "
+        "and accurate. Use tools when they help, and clearly report what you did."
+    )
+
+
+@dataclass
+class McpConfig(_Settings):
+    servers: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class ToolRouterConfig(_Settings):
     strategy: str = "embedding"
     top_k: int = 10
@@ -146,6 +162,8 @@ class DaemonConfig(_Settings):
     llm: LlmConfig = field(default_factory=LlmConfig)
     ipc: IpcConfig = field(default_factory=IpcConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    agents: AgentsConfig = field(default_factory=AgentsConfig)
+    mcp: McpConfig = field(default_factory=McpConfig)
     tool_router: ToolRouterConfig = field(default_factory=ToolRouterConfig)
     dictation: DictationConfig = field(default_factory=DictationConfig)
     search: SearchConfig = field(default_factory=SearchConfig)

@@ -13,12 +13,23 @@ import time
 
 import numpy as np
 
+from blankslate.agent import Agent, AgentOptions
 from blankslate.audio.io import MicCapture, MicCaptureError, Speaker
 from blankslate.audio.ringbuffer import RingBuffer
 from blankslate.audio.vad import UtteranceDetector, Vad
 from blankslate.config import DaemonConfig
 from blankslate.ipc.server import IpcServer
+from blankslate.llm.ollama import OllamaProvider
+from blankslate.mcp.mcp_runner import McpRunner
+from blankslate.memory import HistoryStore
+from blankslate.memory.digest import Digester
+from blankslate.nlu.intent import IntentJudge
+from blankslate.nlu.planner import TaskPlanner
+from blankslate.router.embeddings import Embedder
+from blankslate.router.tool_router import ToolRouter
+from blankslate.security.redactor import Redactor
 from blankslate.stt.engine import STTEngine, build_stt_engine
+from blankslate.tools.native import NativeToolRunner
 from blankslate.tts.engine import TTSEngine, build_tts_engine
 from blankslate.wake import WakeEngine, build_wake_engine
 
@@ -38,11 +49,18 @@ class DaemonApp:
         self._tts: TTSEngine | None = None
         self._pipeline_task: asyncio.Task | None = None
         self._level_last: float = 0.0
+        self._agent: Agent | None = None
+        self._history: HistoryStore | None = None
+        self._digest: Digester | None = None
+        self._mcp: McpRunner | None = None
+        self._judge: IntentJudge | None = None
+        self._agent_available = False
 
     # ------------------------------------------------------------------ lifecycle
 
     async def run(self) -> None:
         self.config.ensure_dirs()
+        self._build_agent_stack()
         self._ipc.on_message = self._handle_message
         await self._ipc.start()
         self._ipc.write_info_file(self.config.ipc_path())
@@ -67,6 +85,78 @@ class DaemonApp:
             except asyncio.CancelledError:
                 pass
         await self._ipc.stop()
+
+    def _build_agent_stack(self) -> None:
+        cfg = self.config
+        data_dir = cfg.resolved_data_dir()
+        llm: OllamaProvider | None = None
+        try:
+            llm = OllamaProvider(
+                base_url=cfg.llm.base_url,
+                model=cfg.llm.model,
+                timeout_s=cfg.llm.timeout_s,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM unavailable: %s", exc)
+
+        mcp: McpRunner | None = None
+        if cfg.mcp.servers:
+            try:
+                mcp = McpRunner.from_config_dicts(cfg.mcp.servers)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("MCP init failed: %s", exc)
+
+        embedder = Embedder(
+            provider=cfg.tool_router.embeddings_provider,
+            model=cfg.tool_router.embedding_model,
+            base_url=cfg.llm.base_url,
+        )
+        router = ToolRouter(
+            strategy=cfg.tool_router.strategy,
+            embedder=embedder,
+            llm=llm,
+            top_k=cfg.tool_router.top_k,
+        )
+        redactor = Redactor(
+            enabled=cfg.redaction.enabled, extra_patterns=cfg.redaction.extra_patterns
+        )
+        native = NativeToolRunner(data_dir)
+        history = HistoryStore(cfg.db_path(), redactor)
+        judge = IntentJudge(llm=None, wake_words=[cfg.wake.model])
+        planner = TaskPlanner(llm)
+        self._mcp = mcp
+        self._agent = Agent(
+            llm=llm,
+            router=router,
+            native=native,
+            planner=planner,
+            options=AgentOptions(
+                system_prompt=cfg.agents.system_prompt,
+                max_iterations=cfg.agents.max_iterations,
+                temperature=cfg.agents.temperature,
+            ),
+            event_cb=self._agent_event,
+            mcp_lister=mcp.list_tools if mcp else None,
+            mcp_caller=self._mcp_call if mcp else None,
+            mcp_server_names=mcp.list_servers() if mcp else [],
+        )
+        self._judge = judge
+        self._agent_available = llm is not None and cfg.agents.enabled
+        self._history = history
+        self._digest = Digester(llm, max_chars=cfg.context.max_tool_output_chars)
+
+    async def _agent_event(self, event: str, payload: dict) -> None:
+        await self._ipc.broadcast({"type": f"agent.{event}", **payload})
+
+    async def _mcp_call(self, server: str, tool: str, arguments: dict) -> str:
+        if self._mcp is None:
+            return "MCP unavailable."
+        try:
+            texts = await self._mcp.call(server, tool, arguments)
+            return "\n".join(texts) or "OK"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mcp call failed (%s/%s): %s", server, tool, exc)
+            return f"MCP error: {exc}"
 
     def _start_pipeline(self) -> None:
         cfg = self.config
@@ -167,9 +257,40 @@ class DaemonApp:
         await self._ipc.broadcast(
             {"type": "transcript", "text": text, "final": True, "source": "voice"}
         )
-        if text and self.config.demo_echo and self._tts is not None:
-            await asyncio.to_thread(self._tts.speak, text)
+        if text:
+            await self._route_text(text, source="voice")
         await self._ipc.broadcast({"type": "state", "listening": self.listening, "status": "ready"})
+
+    async def _route_text(self, text: str, source: str = "voice") -> None:
+        if not self._agent_available or self._agent is None or self._judge is None:
+            if text and self.config.demo_echo and self._tts is not None:
+                await asyncio.to_thread(self._tts.speak, text)
+            return
+
+        intent = await self._judge.judge(text)
+        await self._ipc.broadcast(
+            {"type": "intent", **intent.to_dict(), "source_input": source}
+        )
+        if not intent.directed:
+            return
+
+        history_turns = []
+        if self._history is not None:
+            history_turns = [
+                {"role": row["role"], "content": row["content"]}
+                for row in self._history.recent(self.config.context.history_turns)
+                if row["role"] in ("user", "assistant")
+            ]
+
+        reply = await self._agent.handle(intent.query, history_turns)
+        if self._history is not None:
+            self._history.append("user", intent.query, source=source)
+            self._history.append("assistant", reply or "")
+        if self._digest is not None and self.config.context.digest_on:
+            summary = await self._digest.digest(f"User: {text}\nAssistant: {reply or ''}")
+            await self._ipc.broadcast({"type": "recall_digest", "summary": summary})
+        if reply and self._tts is not None:
+            await asyncio.to_thread(self._tts.speak, reply)
 
     # -------------------------------------------------------------------- commands
 
