@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blankslate"
+version = "0.1.0"
+description = "Local-first AI voice assistant for Windows 11"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "BlankSlate contributors" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "License :: OSI Approved :: Apache Software License",
+]
+
+dependencies = [
+    # audio
+    "sounddevice>=0.4.6",
+    "numpy>=1.26",
+    "webrtcvad>=2.0.10",
+    # wake word
+    "openwakeword~=0.6.0",
+    "onnxruntime>=1.16",
+    # stt
+    "faster-whisper>=1.0",
+    # ipc / llm
+    "websockets>=12",
+    "httpx>=0.27",
+    # mcp
+    "mcp>=2.0",
+    # dictation
+    "keyboard>=0.13",
+    # windows automation
+    "pywin32>=306",
+    "comtypes>=1.3",
+    "pycaw>=20251023",
+    "pywinauto>=0.4.11",
+    "Pillow>=10",
+    "psutil>=5.9",
+    # web search
+    "ddgs>=9",
+]
+
+[project.optional-dependencies]
+tts-kokoro = [
+    "kokoro>=0.9",
+    "misaki[en]>=0.8",
+    "torch>=2.2",
+    "soundfile>=0.12",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+blankslate = "blankslate.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"

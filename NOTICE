@@ -1,0 +1,13 @@
+BlankSlate
+Copyright 2026 BlankSlate contributors
+
+BlankSlate is licensed under the Apache License, Version 2.0.
+See LICENSE for the full license text.
+
+Third-party software notices, license audit results, and attribution for
+every dependency and bundled asset live in THIRD_PARTY_NOTICES.md.
+
+This product includes no code copied from isair/jarvis (which is licensed
+under terms that are not permissive open-source) or from any other
+non-permissively licensed reference. Those projects are used strictly as
+design references.
