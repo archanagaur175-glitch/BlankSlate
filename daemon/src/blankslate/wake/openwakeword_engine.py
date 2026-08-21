@@ -35,9 +35,14 @@ class WakeEngine(ABC):
 
 
 def _wakeword_class():
-    from openwakeword import WakeWord
+    try:
+        from openwakeword.model import Model
 
-    return WakeWord
+        return Model
+    except ImportError:
+        from openwakeword import WakeWord  # type: ignore
+
+        return WakeWord
 
 
 class OpenWakeWordEngine(WakeEngine):

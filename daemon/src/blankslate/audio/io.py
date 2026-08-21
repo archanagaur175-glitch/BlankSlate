@@ -58,7 +58,10 @@ class MicCapture:
                 logger.debug("mic status: %s", status)
             chunk = np.asarray(indata, dtype=np.float32).reshape(-1)
             if self._loop and not self._loop.is_closed():
-                self._loop.call_soon_threadsafe(self._queue.put_nowait, chunk.copy())
+                try:
+                    self._queue.put_nowait(chunk.copy())
+                except asyncio.QueueFull:
+                    pass  # drop frame under backpressure instead of erroring
 
         try:
             self._input = sd.InputStream(

@@ -265,6 +265,19 @@ fn ollama_up() -> bool {
     .is_ok()
 }
 
+/// Best-effort termination of any process with the given image name. Used to
+/// clean up orphaned daemons/engines left by crashed or upgraded runs so the
+/// freshly launched instance is the only one holding the mic and model files.
+#[cfg(target_os = "windows")]
+fn kill_process(name: &str) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", name])
+        .output();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process(_name: &str) {}
+
 /// When the installer bundles a frozen daemon under `resources/daemon/`, launch
 /// it so the HUD is fully self-contained. If no bundled binary exists we assume
 /// an external daemon is already running and connect to it instead.
@@ -294,6 +307,16 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(WsState::default())
         .invoke_handler(tauri::generate_handler![send_message, get_daemon_status])
+        .plugin(
+            tauri_plugin_single_instance::Builder::new(|app, _argv, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            })
+            .build(),
+        )
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 let win = window.clone();
@@ -310,6 +333,10 @@ pub fn run() {
             }
 
             build_tray(app)?;
+            // Kill any orphaned daemons/engines from a previous (crashed or
+            // upgraded) run so a single instance owns the mic and models.
+            kill_process("blankslate.exe");
+            kill_process("ollama.exe");
             launch_ollama(app);
             launch_bundled_daemon(app);
 

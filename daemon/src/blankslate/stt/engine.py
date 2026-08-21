@@ -51,18 +51,38 @@ class FasterWhisperEngine(STTEngine):
         device = self.device
         if device == "auto":
             device = "cuda" if _ctranslate2_cuda_available() else "cpu"
+        self._device = device
         logger.info("STT loading %s on %s (%s)", self.model, device, self.compute)
-        self._model = WhisperModel(self.model, device=device, compute_type=self.compute)
+        try:
+            self._model = WhisperModel(self.model, device=device, compute_type=self.compute)
+        except Exception as exc:  # noqa: BLE001
+            if device != "cpu":
+                logger.warning("STT CUDA load failed (%s); falling back to CPU", exc)
+                self._device = "cpu"
+                self._model = WhisperModel(self.model, device="cpu", compute_type=self.compute)
+            else:
+                raise
 
     def transcribe(self, audio: np.ndarray, language: str | None = None) -> str:
         self._ensure_model()
         samples = np.asarray(audio, dtype=np.float32).reshape(-1)
         if samples.size == 0:
             return ""
-        segments, _info = self._model.transcribe(  # type: ignore[union-attr]
-            samples, language=language, vad_filter=True
-        )
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        try:
+            segments, _info = self._model.transcribe(  # type: ignore[union-attr]
+                samples, language=language, vad_filter=True
+            )
+            return " ".join(seg.text.strip() for seg in segments).strip()
+        except Exception as exc:  # noqa: BLE001
+            if getattr(self, "_device", "cpu") != "cpu" and (
+                "cublas" in str(exc).lower() or "cuda" in str(exc).lower()
+            ):
+                logger.warning("STT CUDA compute failed (%s); rebuilding on CPU", exc)
+                self._model = None
+                self._device = "cpu"
+                return self.transcribe(audio, language=language)
+            logger.error("transcription failed: %s", exc)
+            return ""
 
 
 class NullSTTEngine(STTEngine):
