@@ -11,7 +11,7 @@
     <?error Unsupported value of sys.BUILDARCH=$(sys.BUILDARCH)?>
 <?endif?>
 
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
     <Product
             Id="*"
             Name="{{product_name}}"
@@ -45,7 +45,6 @@
 
         <InstallExecuteSequence>
             <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
-            <Custom Action="KillRunningApps" Before="InstallInitialize">NOT (REMOVE = "ALL")</Custom>
         </InstallExecuteSequence>
 
         <Media Id="1" Cabinet="app.cab" EmbedCab="yes" CompressionLevel="high" />
@@ -88,10 +87,11 @@
         <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
         <CustomAction Id="LaunchApplication" Impersonate="yes" FileKey="Path" ExeCommand="[LAUNCHAPPARGS]" Return="asyncNoWait" />
 
-        <!-- Kill any running BlankSlate / daemon / ollama so their files can be
+        <!-- Close any running BlankSlate / daemon / ollama so their files can be
              replaced during an upgrade and only one instance ends up running. -->
-        <CustomAction Id="KillRunningApps" Directory="TARGETDIR" Execute="deferred" Impersonate="no" Return="ignore"
-            ExeCommand="[SystemFolder]cmd.exe /c taskkill /F /IM BlankSlate.exe /IM blankslate.exe /IM ollama.exe &amp; exit /b 0" />
+        <util:CloseApplication Id="CloseBlankSlate" Target="BlankSlate.exe" />
+        <util:CloseApplication Id="CloseBlankslateDaemon" Target="blankslate.exe" />
+        <util:CloseApplication Id="CloseOllama" Target="ollama.exe" />
 
         <UI>
             <!-- launch app checkbox -->
