@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependencies-path: daemon/pyproject.toml
+          cache-dependency-path: daemon/pyproject.toml
 
       - uses: pnpm/action-setup@v4
         with:
@@ -30,6 +30,7 @@ jobs:
         with:
           node-version: "22"
           cache: "pnpm"
+          cache-dependency-path: hud/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@stable
         with:
