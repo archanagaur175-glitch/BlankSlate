@@ -410,25 +410,41 @@ class DaemonApp:
         )
 
     async def _process_utterance(self, audio: np.ndarray, source: str = "voice") -> None:
-        if source == "dictation":
-            engine = self._dict_stt or self._stt
-            lang = self.config.dictation.language
-        else:
-            engine = self._stt
-            lang = self.config.stt.language
-        if engine is None:
-            return
         try:
-            text = await asyncio.to_thread(engine.transcribe, audio, lang)
+            if source == "dictation":
+                engine = self._dict_stt or self._stt
+                lang = self.config.dictation.language
+            else:
+                engine = self._stt
+                lang = self.config.stt.language
+            if engine is None:
+                return
+            try:
+                text = await asyncio.to_thread(engine.transcribe, audio, lang)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("transcription failed: %s", exc)
+                text = ""
+            await self._ipc.broadcast(
+                {"type": "transcript", "text": text, "final": True, "source": source}
+            )
+            if text:
+                await self._route_text(text, source=source)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("transcription failed: %s", exc)
-            text = ""
-        await self._ipc.broadcast(
-            {"type": "transcript", "text": text, "final": True, "source": source}
-        )
-        if text:
-            await self._route_text(text, source=source)
-        await self._broadcast_state("ready")
+            # Any failure in transcription/routing must never leave the HUD stuck
+            # on "Thinking…"; surface it and reset to a ready state.
+            logger.error("utterance processing failed: %s", exc)
+            try:
+                await self._ipc.broadcast(
+                    {"type": "agent.agent_reply", "text": f"[error] {exc}"}
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            self._state = "wake-listening" if self._wake_enabled else "idle"
+            try:
+                await self._broadcast_state("ready")
+            except Exception:  # noqa: BLE001
+                pass
 
     # ------------------------------------------------------- push-to-talk input
 
