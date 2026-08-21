@@ -43,6 +43,19 @@ jobs:
         working-directory: daemon
         shell: pwsh
 
+      - name: Download bundled Ollama (Windows portable)
+        run: |
+          $dest = "hud/src-tauri/resources/ollama"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $tag = (Invoke-RestMethod https://api.github.com/repos/ollama/ollama/releases/latest).tag_name
+          $url = "https://github.com/ollama/ollama/releases/download/$tag/ollama-windows-amd64.zip"
+          Write-Output "Downloading Ollama $tag from $url"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ollama.zip"
+          Expand-Archive -Path "$env:TEMP\ollama.zip" -DestinationPath $dest -Force
+          Remove-Item -Force "$env:TEMP\ollama.zip"
+          Write-Output "Ollama bundled at $dest"
+        shell: pwsh
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
         working-directory: hud

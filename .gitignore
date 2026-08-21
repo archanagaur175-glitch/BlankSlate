@@ -19,6 +19,8 @@ frontend_dist/
 # Rust / Tauri
 hud/src-tauri/target/
 hud/dist/
+# Bundled Ollama binary (downloaded at release build time, ~2 GB)
+hud/src-tauri/resources/ollama/
 
 # Local data (never commit user data or models)
 *.log

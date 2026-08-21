@@ -59,6 +59,8 @@
         return "Listening…";
       case "processing":
         return "Thinking…";
+      case "preparing":
+        return "Preparing…";
       case "ready":
         return "Ready";
       default:

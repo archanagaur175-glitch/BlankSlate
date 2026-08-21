@@ -8,10 +8,12 @@ machine is degraded gracefully so the daemon always starts and serves the HUD.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 
 import numpy as np
+import requests
 
 from blankslate.agent import Agent, AgentOptions
 from blankslate.audio.io import MicCapture, MicCaptureError, Speaker
@@ -74,6 +76,7 @@ class DaemonApp:
         self._ipc.on_message = self._handle_message
         await self._ipc.start()
         self._ipc.write_info_file(self.config.ipc_path())
+        await self._ensure_models()
         await self._ipc.broadcast({"type": "state", "listening": True, "status": "ready"})
         self._start_pipeline()
         logger.info("BlankSlate daemon ready (%s)", self.config.resolved_data_dir())
@@ -81,6 +84,80 @@ class DaemonApp:
             await self._shutdown.wait()
         finally:
             await self._stop()
+
+    # ----------------------------------------------------- model bootstrap
+    async def _ensure_models(self) -> None:
+        """Pull the LLM + embedding models if they aren't already present.
+
+        Runs automatically on first launch so the app needs no manual setup;
+        degrades silently if Ollama is unreachable.
+        """
+        base = self.config.llm.base_url
+        required = [self.config.llm.model, self.config.tool_router.embedding_model]
+        await self._ipc.broadcast(
+            {"type": "state", "listening": True, "status": "preparing", "wake_enabled": self._wake_enabled, "ptt_active": False}
+        )
+        await self._ipc.broadcast(
+            {"type": "daemon_status", "connected": True, "detail": "Preparing models…"}
+        )
+        # Wait for Ollama to come up (the bundled server may still be booting).
+        for _ in range(180):
+            try:
+                r = await asyncio.to_thread(requests.get, f"{base}/api/tags", timeout=3)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+        else:
+            logger.warning("ollama not reachable; skipping model bootstrap")
+            return
+        try:
+            tags = await asyncio.to_thread(requests.get, f"{base}/api/tags", timeout=10)
+            have = {m.get("name") for m in tags.json().get("models", [])}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not list ollama models: %s", exc)
+            return
+        for model in required:
+            if model in have:
+                continue
+            await self._ipc.broadcast(
+                {"type": "daemon_status", "connected": True, "detail": f"Pulling {model}…"}
+            )
+            await asyncio.to_thread(self._pull_model_sync, base, model)
+
+    def _pull_model_sync(self, base: str, model: str) -> None:
+        loop = self._loop
+        ipc = self._ipc
+
+        def emit(msg: str) -> None:
+            loop.call_soon_threadsafe(
+                lambda m=msg: asyncio.ensure_future(
+                    ipc.broadcast({"type": "daemon_status", "connected": True, "detail": m})
+                )
+            )
+
+        try:
+            resp = requests.post(
+                f"{base}/api/pull",
+                json={"model": model, "stream": True},
+                stream=True,
+                timeout=600,
+            )
+            for raw in resp.iter_lines():
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                status = data.get("status", "")
+                total = data.get("total")
+                completed = data.get("completed")
+                pct = f" {int(completed * 100 / total)}%" if total and completed else ""
+                emit(f"Pulling {model}: {status}{pct}")
+        except Exception as exc:  # noqa: BLE001
+            emit(f"Model pull failed ({model}): {exc}")
 
     async def stop(self) -> None:
         self._shutdown.set()

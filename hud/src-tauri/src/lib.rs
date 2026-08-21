@@ -1,3 +1,4 @@
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -16,6 +17,7 @@ struct WsState {
     tx: tokio::sync::Mutex<Option<mpsc::UnboundedSender<String>>>,
     status: StdMutex<ConStatus>,
     daemon_child: StdMutex<Option<std::process::Child>>,
+    ollama_child: StdMutex<Option<std::process::Child>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -213,6 +215,44 @@ fn init_logging() {
         .try_init();
 }
 
+/// If the installer bundled Ollama under `resources/ollama/`, start its server
+/// so the assistant works with zero manual setup. If Ollama is already running
+/// (e.g. a system install) or no bundle exists, we just connect to it.
+fn launch_ollama(app: &tauri::App) {
+    let res = match app.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+    let path = res.join("ollama").join("ollama.exe");
+    if !path.exists() {
+        log::info!("no bundled ollama at {:?}; expecting system ollama", path);
+        return;
+    }
+    if ollama_up() {
+        log::info!("ollama already running; using existing instance");
+        return;
+    }
+    match std::process::Command::new(&path)
+        .arg("serve")
+        .env("OLLAMA_HOST", "127.0.0.1:11434")
+        .spawn()
+    {
+        Ok(child) => {
+            log::info!("launched bundled ollama from {:?}", path);
+            *app.state::<WsState>().ollama_child.lock().unwrap() = Some(child);
+        }
+        Err(err) => log::warn!("failed to launch bundled ollama: {err}"),
+    }
+}
+
+fn ollama_up() -> bool {
+    TcpStream::connect_timeout(
+        &"127.0.0.1:11434".parse().unwrap(),
+        Duration::from_millis(300),
+    )
+    .is_ok()
+}
+
 /// When the installer bundles a frozen daemon under `resources/daemon/`, launch
 /// it so the HUD is fully self-contained. If no bundled binary exists we assume
 /// an external daemon is already running and connect to it instead.
@@ -258,6 +298,7 @@ pub fn run() {
             }
 
             build_tray(app)?;
+            launch_ollama(app);
             launch_bundled_daemon(app);
 
             let handle = app.handle().clone();
@@ -272,6 +313,9 @@ pub fn run() {
     app.run(|_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             if let Some(mut child) = _handle.state::<WsState>().daemon_child.lock().unwrap().take() {
+                let _ = child.kill();
+            }
+            if let Some(mut child) = _handle.state::<WsState>().ollama_child.lock().unwrap().take() {
                 let _ = child.kill();
             }
         }
