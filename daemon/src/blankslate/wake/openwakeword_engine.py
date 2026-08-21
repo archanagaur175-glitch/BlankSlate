@@ -76,23 +76,35 @@ class OpenWakeWordEngine(WakeEngine):
             raise FileNotFoundError(f"wake model {self.model!r} not found and not a builtin model")
 
     def process(self, chunk: np.ndarray) -> list[WakeDetection]:
+        if getattr(self, "_broken", False):
+            return []
         detections: list[WakeDetection] = []
-        self._ensure_model()
-        self._frame_buf = np.concatenate(
-            [self._frame_buf, np.asarray(chunk, dtype=np.float32).reshape(-1)]
-        )
-        while self._frame_buf.size >= self.FRAME_SAMPLES:
-            frame = self._frame_buf[: self.FRAME_SAMPLES]
-            self._frame_buf = self._frame_buf[self.FRAME_SAMPLES :]
-            scores = self._ww.predict(frame, threshold=self.threshold)  # type: ignore[union-attr]
-            for label, value in self._ephemeral_scores(scores):
-                if value >= self.threshold:
-                    self._hits += 1
-                    if self._hits >= self.trigger_level:
-                        detections.append(WakeDetection(label=label, confidence=value))
+        try:
+            self._ensure_model()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("wake model unavailable; disabling wake word: %s", exc)
+            self._broken = True
+            return []
+        try:
+            self._frame_buf = np.concatenate(
+                [self._frame_buf, np.asarray(chunk, dtype=np.float32).reshape(-1)]
+            )
+            while self._frame_buf.size >= self.FRAME_SAMPLES:
+                frame = self._frame_buf[: self.FRAME_SAMPLES]
+                self._frame_buf = self._frame_buf[self.FRAME_SAMPLES :]
+                scores = self._ww.predict(frame, threshold=self.threshold)  # type: ignore[union-attr]
+                for label, value in self._ephemeral_scores(scores):
+                    if value >= self.threshold:
+                        self._hits += 1
+                        if self._hits >= self.trigger_level:
+                            detections.append(WakeDetection(label=label, confidence=value))
+                            self._hits = 0
+                    else:
                         self._hits = 0
-                else:
-                    self._hits = 0
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("wake prediction error; disabling wake word: %s", exc)
+            self._broken = True
+            return []
         return detections
 
     @staticmethod

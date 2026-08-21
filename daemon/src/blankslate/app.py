@@ -316,69 +316,79 @@ class DaemonApp:
         block = 0
 
         while not self._shutdown.is_set():
-            chunk = await mic.read()
-            ring.append(chunk)
-            block += 1
-            if block % 5 == 0:
-                await self._emit_level(chunk)
+            try:
+                chunk = await mic.read()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("microphone read failed; stopping audio pipeline: %s", exc)
+                break
+            try:
+                ring.append(chunk)
+                block += 1
+                if block % 5 == 0:
+                    await self._emit_level(chunk)
 
-            # Push-to-talk requests are honoured regardless of the wake toggle so
-            # the HUD / hotkey can always capture a dictation turn.
-            req = self._ptt_request
-            if req is not None:
-                self._ptt_request = None
-                if req == "start" and self._state not in ("capturing", "ptt"):
-                    self._state = "ptt"
-                    self._ptt_active = True
-                    self._ptt_detector = UtteranceDetector(
-                        cfg.sample_rate,
-                        vad,
-                        self.config.dictation.max_utterance_ms,
-                        self.config.dictation.max_utterance_ms,
-                        cfg.block_ms,
-                    )
-                    self._ptt_detector.arm()
-                    await self._broadcast_state("capturing")
-                    if cfg.play_chime:
-                        await asyncio.to_thread(self._speaker.play_chime)
-                elif req == "stop" and self._state == "ptt":
-                    audio = self._ptt_detector.finalize() if self._ptt_detector else None
-                    self._ptt_active = False
-                    self._ptt_detector = None
-                    self._state = "wake-listening" if self._wake_enabled else "idle"
-                    await self._broadcast_state("processing")
-                    if audio is not None and audio.size:
-                        await self._process_utterance(audio, source="dictation")
-
-            if self._state == "wake-listening" and self.listening:
-                detections = self._wake.process(chunk) if self._wake else []
-                if detections:
-                    self._state = "capturing"
-                    wake_detector.arm()
-                    pre_trigger = ring.get_last(pad_samples)
-                    det = detections[0]
-                    await self._ipc.broadcast({"type": "wake", **det.to_dict()})
-                    await self._broadcast_state("capturing")
-                    if cfg.play_chime:
-                        await asyncio.to_thread(self._speaker.play_chime)
-            elif self._state in ("capturing", "ptt"):
-                detector = wake_detector if self._state == "capturing" else self._ptt_detector
-                if detector is None:
-                    self._state = "wake-listening" if self._wake_enabled else "idle"
-                    continue
-                utterance = detector.feed(chunk)
-                if utterance is not None:
-                    if self._state == "capturing":
-                        self._state = "wake-listening"
-                        await self._broadcast_state("processing")
-                        audio = np.concatenate([pre_trigger, utterance])
-                        await self._process_utterance(audio)
-                    else:
+                # Push-to-talk requests are honoured regardless of the wake toggle so
+                # the HUD / hotkey can always capture a dictation turn.
+                req = self._ptt_request
+                if req is not None:
+                    self._ptt_request = None
+                    if req == "start" and self._state not in ("capturing", "ptt"):
+                        self._state = "ptt"
+                        self._ptt_active = True
+                        self._ptt_detector = UtteranceDetector(
+                            cfg.sample_rate,
+                            vad,
+                            self.config.dictation.max_utterance_ms,
+                            self.config.dictation.max_utterance_ms,
+                            cfg.block_ms,
+                        )
+                        self._ptt_detector.arm()
+                        await self._broadcast_state("capturing")
+                        if cfg.play_chime:
+                            await asyncio.to_thread(self._speaker.play_chime)
+                    elif req == "stop" and self._state == "ptt":
+                        audio = self._ptt_detector.finalize() if self._ptt_detector else None
                         self._ptt_active = False
                         self._ptt_detector = None
                         self._state = "wake-listening" if self._wake_enabled else "idle"
                         await self._broadcast_state("processing")
-                        await self._process_utterance(utterance, source="dictation")
+                        if audio is not None and audio.size:
+                            await self._process_utterance(audio, source="dictation")
+
+                if self._state == "wake-listening" and self.listening:
+                    detections = self._wake.process(chunk) if self._wake else []
+                    if detections:
+                        self._state = "capturing"
+                        wake_detector.arm()
+                        pre_trigger = ring.get_last(pad_samples)
+                        det = detections[0]
+                        await self._ipc.broadcast({"type": "wake", **det.to_dict()})
+                        await self._broadcast_state("capturing")
+                        if cfg.play_chime:
+                            await asyncio.to_thread(self._speaker.play_chime)
+                elif self._state in ("capturing", "ptt"):
+                    detector = wake_detector if self._state == "capturing" else self._ptt_detector
+                    if detector is None:
+                        self._state = "wake-listening" if self._wake_enabled else "idle"
+                        continue
+                    utterance = detector.feed(chunk)
+                    if utterance is not None:
+                        if self._state == "capturing":
+                            self._state = "wake-listening"
+                            await self._broadcast_state("processing")
+                            audio = np.concatenate([pre_trigger, utterance])
+                            await self._process_utterance(audio)
+                        else:
+                            self._ptt_active = False
+                            self._ptt_detector = None
+                            self._state = "wake-listening" if self._wake_enabled else "idle"
+                            await self._broadcast_state("processing")
+                            await self._process_utterance(utterance, source="dictation")
+            except Exception as exc:  # noqa: BLE001
+                # A single bad audio block must never kill the pipeline; log and
+                # keep listening so push-to-talk / wake keep working.
+                logger.warning("audio pipeline error (continuing): %s", exc)
+                continue
 
     async def _emit_level(self, chunk: np.ndarray) -> None:
         now = time.monotonic()
