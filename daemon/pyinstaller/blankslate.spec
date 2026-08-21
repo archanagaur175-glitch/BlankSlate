@@ -11,11 +11,17 @@ ships a self-contained, offline-capable assistant.
 """
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DAEMON_ROOT = os.path.dirname(HERE)
+# PyInstaller executes this spec without defining ``__file__``, so locate the
+# spec from the command line argument and walk up to the daemon root.
+SPEC_PATH = next((a for a in sys.argv if a.endswith(".spec")), None)
+if SPEC_PATH:
+    DAEMON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPEC_PATH)))
+else:
+    DAEMON_ROOT = os.getcwd()
 SRC = os.path.join(DAEMON_ROOT, "src")
 
 hiddenimports = collect_submodules("blankslate")
