@@ -16,6 +16,7 @@ from pathlib import Path
 import psutil
 
 from blankslate.router.tool_router import ToolSpec
+from blankslate.tools.windows import WINDOW_TOOLS, window_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,19 @@ async def search_web(arguments: dict) -> str:
     try:
         from ddgs import DDGS
 
+        max_results = int(arguments.get("max_results") or 5)
+        results: list[dict] = []
         async with DDGS() as ddgs:
-            results = await ddgs.atext(query, max_results=int(arguments.get("max_results") or 5))
+            try:
+                results = await ddgs.atext(query, max_results=max_results)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ddgs text search failed: %s", exc)
+            if not results:
+                try:
+                    answers = await ddgs.aanswers(query)
+                    results = [{"title": a.get("text") or "", "href": ""} for a in (answers or [])]
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ddgs answers fallback failed: %s", exc)
         if not results:
             return "No results found."
         lines = []
@@ -196,10 +208,12 @@ class NativeToolRunner:
         self.data_dir = Path(data_dir)
 
     def specs(self) -> list[ToolSpec]:
-        return list(NATIVE_TOOLS)
+        return list(NATIVE_TOOLS) + list(WINDOW_TOOLS)
 
     async def run(self, name: str, arguments: dict) -> str:
         coro = _dispatch(name, arguments, self.data_dir)
+        if coro is None:
+            coro = window_dispatch(name, arguments, self.data_dir)
         try:
             if coro is None:
                 return f"Unknown tool: {name}"
@@ -210,7 +224,7 @@ class NativeToolRunner:
             return f"Tool {name} error: {exc}"
 
 
-def _dispatch(name: str, arguments: dict, data_dir: Path):
+def _dispatch(name: str, arguments: dict, data_dir):
     if name == "get_current_time":
         return get_current_time(arguments)
     if name == "get_cpu_usage":
