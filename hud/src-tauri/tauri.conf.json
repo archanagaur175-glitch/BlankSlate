@@ -39,7 +39,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi"],
     "shortDescription": "BlankSlate HUD",
     "longDescription": "A private, local-first AI voice assistant overlay.",
     "resources": {
