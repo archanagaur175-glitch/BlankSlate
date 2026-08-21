@@ -44,6 +44,8 @@ jobs:
         shell: pwsh
 
       - name: Download bundled Ollama (Windows portable)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $dest = "hud/src-tauri/resources/ollama"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -59,7 +61,9 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ollama.zip"
           Expand-Archive -Path "$env:TEMP\ollama.zip" -DestinationPath $dest -Force
           Remove-Item -Force "$env:TEMP\ollama.zip"
+          if (-not (Test-Path "$dest/ollama.exe")) { throw "ollama.exe not found after extraction" }
           Write-Output "Ollama bundled at $dest"
+          exit 0
         shell: pwsh
 
       - name: Install frontend dependencies
