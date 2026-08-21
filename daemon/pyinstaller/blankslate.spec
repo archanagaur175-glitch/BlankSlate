@@ -14,11 +14,15 @@ import os
 
 from PyInstaller.utils.hooks import collect_submodules
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+DAEMON_ROOT = os.path.dirname(HERE)
+SRC = os.path.join(DAEMON_ROOT, "src")
+
 hiddenimports = collect_submodules("blankslate")
 
 a = Analysis(
-    ["src/blankslate/__main__.py"],
-    pathex=["src"],
+    [os.path.join(SRC, "blankslate", "__main__.py")],
+    pathex=[SRC],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
