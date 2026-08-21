@@ -68,6 +68,22 @@ floats above your desktop.
 See `docs/` for architecture, MCP configuration, wake-word training, and the
 manual QA checklist.
 
+## Packaging & release
+
+A self-contained Windows installer is produced by the `Release` workflow when a
+`v*` tag is pushed. It:
+
+1. Freezes the Python daemon into a standalone folder with PyInstaller
+   (`daemon/pyinstaller/blankslate.spec`, copied by `daemon/build_daemon.ps1`
+   into `hud/src-tauri/resources/daemon/`).
+2. Builds the HUD installer (`pnpm tauri build`) for MSI and NSIS targets.
+3. Uploads the installers as assets on the GitHub release.
+
+The HUD launches the bundled daemon automatically if present; otherwise it
+connects to an externally running daemon. Build the frozen daemon locally with
+`.\daemon\build_daemon.ps1`.
+
+
 ## Licensing
 
 BlankSlate is licensed under the **Apache License 2.0** (see `LICENSE`).

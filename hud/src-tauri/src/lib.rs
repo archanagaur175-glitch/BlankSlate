@@ -15,6 +15,7 @@ const RECONNECT_DELAY_SECS: u64 = 2;
 struct WsState {
     tx: tokio::sync::Mutex<Option<mpsc::UnboundedSender<String>>>,
     status: StdMutex<ConStatus>,
+    daemon_child: StdMutex<Option<std::process::Child>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -212,10 +213,33 @@ fn init_logging() {
         .try_init();
 }
 
+/// When the installer bundles a frozen daemon under `resources/daemon/`, launch
+/// it so the HUD is fully self-contained. If no bundled binary exists we assume
+/// an external daemon is already running and connect to it instead.
+fn launch_bundled_daemon(app: &tauri::App) {
+    let res = match app.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+    let exe = if cfg!(windows) { "blankslate.exe" } else { "blankslate" };
+    let path = res.join("daemon").join(exe);
+    if !path.exists() {
+        log::info!("no bundled daemon at {:?}; expecting external daemon", path);
+        return;
+    }
+    match std::process::Command::new(&path).spawn() {
+        Ok(child) => {
+            log::info!("launched bundled daemon from {:?}", path);
+            *app.state::<WsState>().daemon_child.lock().unwrap() = Some(child);
+        }
+        Err(err) => log::warn!("failed to launch bundled daemon: {err}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(WsState::default())
         .invoke_handler(tauri::generate_handler![send_message, get_daemon_status])
         .setup(|app| {
@@ -234,6 +258,7 @@ pub fn run() {
             }
 
             build_tray(app)?;
+            launch_bundled_daemon(app);
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -241,6 +266,14 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running BlankSlate HUD");
+        .build(tauri::generate_context!())
+        .expect("error while building BlankSlate HUD");
+
+    app.run(|_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let Some(mut child) = _handle.state::<WsState>().daemon_child.lock().unwrap().take() {
+                let _ = child.kill();
+            }
+        }
+    });
 }
