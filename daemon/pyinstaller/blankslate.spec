@@ -13,7 +13,7 @@ ships a self-contained, offline-capable assistant.
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # PyInstaller executes this spec without defining ``__file__``, so locate the
 # spec from the command line argument and walk up to the daemon root.
@@ -24,17 +24,53 @@ else:
     DAEMON_ROOT = os.getcwd()
 SRC = os.path.join(DAEMON_ROOT, "src")
 
-hiddenimports = collect_submodules("blankslate")
+# The daemon imports its heavy ML dependencies lazily at runtime, so PyInstaller
+# cannot discover them from a static scan. Collect them explicitly. Kokoro/Torch
+# are excluded on purpose; the daemon falls back to the offline Windows SAPI
+# voice when they are absent, keeping the bundle lean.
+BUNDLE_PACKAGES = [
+    "faster_whisper",
+    "ctranslate2",
+    "huggingface_hub",
+    "tokenizers",
+    "onnxruntime",
+    "openwakeword",
+    "sounddevice",
+    "webrtcvad",
+    "pycaw",
+    "pywin32",
+    "comtypes",
+    "pywinauto",
+    "Pillow",
+    "psutil",
+    "ddgs",
+    "mcp",
+    "httpx",
+    "anyio",
+]
+
+datas = []
+binaries = []
+hiddenimports = list(collect_submodules("blankslate"))
+for pkg in BUNDLE_PACKAGES:
+    try:
+        d, b, h = collect_all(pkg)
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: could not collect {pkg}: {exc}")
+        continue
+    datas.extend(d)
+    binaries.extend(b)
+    hiddenimports.extend(h)
 
 a = Analysis(
     [os.path.join(SRC, "blankslate", "__main__.py")],
     pathex=[SRC],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["PyQt5", "PyQt6", "tkinter"],
+    excludes=["PyQt5", "PyQt6", "tkinter", "torch", "kokoro", "misaki", "transformers"],
     noarchive=False,
 )
 
