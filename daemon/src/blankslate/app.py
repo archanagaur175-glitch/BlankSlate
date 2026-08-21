@@ -18,6 +18,7 @@ from blankslate.audio.io import MicCapture, MicCaptureError, Speaker
 from blankslate.audio.ringbuffer import RingBuffer
 from blankslate.audio.vad import UtteranceDetector, Vad
 from blankslate.config import DaemonConfig
+from blankslate.input.hotkey import HotkeyManager
 from blankslate.ipc.server import IpcServer
 from blankslate.llm.ollama import OllamaProvider
 from blankslate.mcp.mcp_runner import McpRunner
@@ -46,6 +47,7 @@ class DaemonApp:
         self._capture: MicCapture | None = None
         self._wake: WakeEngine | None = None
         self._stt: STTEngine | None = None
+        self._dict_stt: STTEngine | None = None
         self._tts: TTSEngine | None = None
         self._pipeline_task: asyncio.Task | None = None
         self._level_last: float = 0.0
@@ -55,11 +57,19 @@ class DaemonApp:
         self._mcp: McpRunner | None = None
         self._judge: IntentJudge | None = None
         self._agent_available = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._wake_enabled: bool = config.wake.enabled
+        self._ptt_active: bool = False
+        self._ptt_request: str | None = None
+        self._ptt_detector: UtteranceDetector | None = None
+        self._hotkey_mgr: HotkeyManager | None = None
+        self._state: str = "idle"
 
     # ------------------------------------------------------------------ lifecycle
 
     async def run(self) -> None:
         self.config.ensure_dirs()
+        self._loop = asyncio.get_running_loop()
         self._build_agent_stack()
         self._ipc.on_message = self._handle_message
         await self._ipc.start()
@@ -76,6 +86,8 @@ class DaemonApp:
         self._shutdown.set()
 
     async def _stop(self) -> None:
+        if self._hotkey_mgr is not None:
+            self._hotkey_mgr.stop()
         if self._capture is not None:
             self._capture.stop()
         if self._pipeline_task is not None:
@@ -168,6 +180,13 @@ class DaemonApp:
             logger.warning("STT unavailable: %s", exc)
             self._stt = None
         try:
+            self._dict_stt = build_stt_engine(
+                cfg.stt.engine, cfg.dictation.model, cfg.stt.device, cfg.stt.compute
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("dictation STT unavailable: %s", exc)
+            self._dict_stt = self._stt
+        try:
             self._wake = build_wake_engine(
                 cfg.wake.engine, cfg.wake.model, cfg.wake.threshold, cfg.wake.trigger_level
             )
@@ -175,7 +194,22 @@ class DaemonApp:
             logger.warning("wake engine unavailable: %s", exc)
             self._wake = None
         self._tts = build_tts_engine(cfg.tts.engine, self._speaker, cfg.tts.voice, cfg.tts.speed)
-        if self._wake is not None and self._stt is not None:
+        self._wake_enabled = cfg.wake.enabled and self._wake is not None
+
+        dict_cfg = cfg.dictation
+        self._hotkey_mgr = HotkeyManager(
+            dict_cfg.hotkey,
+            on_start=self._ptt_press,
+            on_stop=self._ptt_release,
+            hold_to_talk=dict_cfg.hold_to_talk,
+        )
+        try:
+            self._hotkey_mgr.start()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("push-to-talk hotkey disabled: %s", exc)
+            self._hotkey_mgr = None
+
+        if self._stt is not None:
             self._pipeline_task = asyncio.create_task(self._listen_loop())
 
     # ------------------------------------------------------------------- pipeline
@@ -196,18 +230,13 @@ class DaemonApp:
         except RuntimeError as exc:
             logger.warning("VAD unavailable: %s", exc)
             vad = None
-        detector = UtteranceDetector(
+        wake_detector = UtteranceDetector(
             cfg.sample_rate, vad, cfg.end_silence_ms, cfg.max_utterance_ms, cfg.block_ms
         )
         pad_samples = int(cfg.sample_rate * cfg.pre_trigger_pad_ms / 1000)
         pre_trigger: np.ndarray = np.zeros(0, dtype=np.float32)
-        state = "wake-listening"
+        self._state = "wake-listening" if self._wake_enabled else "idle"
         block = 0
-
-        async def set_status(status: str) -> None:
-            await self._ipc.broadcast(
-                {"type": "state", "listening": self.listening, "status": status}
-            )
 
         while not self._shutdown.is_set():
             chunk = await mic.read()
@@ -216,27 +245,63 @@ class DaemonApp:
             if block % 5 == 0:
                 await self._emit_level(chunk)
 
-            if not self.listening:
-                continue
+            # Push-to-talk requests are honoured regardless of the wake toggle so
+            # the HUD / hotkey can always capture a dictation turn.
+            req = self._ptt_request
+            if req is not None:
+                self._ptt_request = None
+                if req == "start" and self._state not in ("capturing", "ptt"):
+                    self._state = "ptt"
+                    self._ptt_active = True
+                    self._ptt_detector = UtteranceDetector(
+                        cfg.sample_rate,
+                        vad,
+                        self.config.dictation.max_utterance_ms,
+                        self.config.dictation.max_utterance_ms,
+                        cfg.block_ms,
+                    )
+                    self._ptt_detector.arm()
+                    await self._broadcast_state("capturing")
+                    if cfg.play_chime:
+                        await asyncio.to_thread(self._speaker.play_chime)
+                elif req == "stop" and self._state == "ptt":
+                    audio = self._ptt_detector.finalize() if self._ptt_detector else None
+                    self._ptt_active = False
+                    self._ptt_detector = None
+                    self._state = "wake-listening" if self._wake_enabled else "idle"
+                    await self._broadcast_state("processing")
+                    if audio is not None and audio.size:
+                        await self._process_utterance(audio, source="dictation")
 
-            if state == "wake-listening":
+            if self._state == "wake-listening" and self.listening:
                 detections = self._wake.process(chunk) if self._wake else []
                 if detections:
-                    state = "capturing"
-                    detector.arm()
+                    self._state = "capturing"
+                    wake_detector.arm()
                     pre_trigger = ring.get_last(pad_samples)
                     det = detections[0]
                     await self._ipc.broadcast({"type": "wake", **det.to_dict()})
-                    await set_status("capturing")
+                    await self._broadcast_state("capturing")
                     if cfg.play_chime:
                         await asyncio.to_thread(self._speaker.play_chime)
-            elif state == "capturing":
+            elif self._state in ("capturing", "ptt"):
+                detector = wake_detector if self._state == "capturing" else self._ptt_detector
+                if detector is None:
+                    self._state = "wake-listening" if self._wake_enabled else "idle"
+                    continue
                 utterance = detector.feed(chunk)
                 if utterance is not None:
-                    state = "wake-listening"
-                    await set_status("processing")
-                    audio = np.concatenate([pre_trigger, utterance])
-                    await self._process_utterance(audio)
+                    if self._state == "capturing":
+                        self._state = "wake-listening"
+                        await self._broadcast_state("processing")
+                        audio = np.concatenate([pre_trigger, utterance])
+                        await self._process_utterance(audio)
+                    else:
+                        self._ptt_active = False
+                        self._ptt_detector = None
+                        self._state = "wake-listening" if self._wake_enabled else "idle"
+                        await self._broadcast_state("processing")
+                        await self._process_utterance(utterance, source="dictation")
 
     async def _emit_level(self, chunk: np.ndarray) -> None:
         now = time.monotonic()
@@ -246,20 +311,57 @@ class DaemonApp:
         level = float(np.sqrt(np.mean(np.square(chunk))))
         await self._ipc.broadcast({"type": "levels", "rms": round(level, 4)})
 
-    async def _process_utterance(self, audio: np.ndarray) -> None:
-        if self._stt is None:
+    async def _broadcast_state(self, status: str) -> None:
+        await self._ipc.broadcast(
+            {
+                "type": "state",
+                "listening": self.listening,
+                "status": status,
+                "wake_enabled": self._wake_enabled,
+                "ptt_active": self._ptt_active,
+            }
+        )
+
+    async def _process_utterance(self, audio: np.ndarray, source: str = "voice") -> None:
+        if source == "dictation":
+            engine = self._dict_stt or self._stt
+            lang = self.config.dictation.language
+        else:
+            engine = self._stt
+            lang = self.config.stt.language
+        if engine is None:
             return
         try:
-            text = await asyncio.to_thread(self._stt.transcribe, audio, self.config.stt.language)
+            text = await asyncio.to_thread(engine.transcribe, audio, lang)
         except Exception as exc:  # noqa: BLE001
             logger.warning("transcription failed: %s", exc)
             text = ""
         await self._ipc.broadcast(
-            {"type": "transcript", "text": text, "final": True, "source": "voice"}
+            {"type": "transcript", "text": text, "final": True, "source": source}
         )
         if text:
-            await self._route_text(text, source="voice")
-        await self._ipc.broadcast({"type": "state", "listening": self.listening, "status": "ready"})
+            await self._route_text(text, source=source)
+        await self._broadcast_state("ready")
+
+    # ------------------------------------------------------- push-to-talk input
+
+    def _ptt_press(self) -> None:
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._request_ptt, "start")
+
+    def _ptt_release(self) -> None:
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._request_ptt, "stop")
+
+    def _request_ptt(self, action: str) -> None:
+        self._ptt_request = action
+
+    def _set_wake(self, enabled: bool) -> None:
+        self._wake_enabled = bool(enabled) and self._wake is not None
+        if self._wake_enabled and self._state == "idle":
+            self._state = "wake-listening"
 
     async def _route_text(self, text: str, source: str = "voice") -> None:
         if not self._agent_available or self._agent is None or self._judge is None:
@@ -298,8 +400,18 @@ class DaemonApp:
             return {"type": "pong", "ok": True}
         if kind == "set_listening":
             self.listening = bool(message.get("value", True))
-            await self._ipc.broadcast(
-                {"type": "state", "listening": self.listening, "status": "ready"}
+            await self._broadcast_state("ready")
+            return {"type": "ack", "ok": True}
+        if kind == "start_dictation":
+            self._ptt_request = "start"
+            return {"type": "ack", "ok": True}
+        if kind == "stop_dictation":
+            self._ptt_request = "stop"
+            return {"type": "ack", "ok": True}
+        if kind == "set_wake":
+            self._set_wake(bool(message.get("value", False)))
+            await self._broadcast_state(
+                "capturing" if self._state in ("capturing", "ptt") else "ready"
             )
             return {"type": "ack", "ok": True}
         if kind == "get_state":
@@ -308,5 +420,7 @@ class DaemonApp:
                 "ok": True,
                 "listening": self.listening,
                 "status": "ready",
+                "wake_enabled": self._wake_enabled,
+                "ptt_active": self._ptt_active,
             }
         return {"type": "error", "ok": False, "error": f"unknown command {kind!r}"}

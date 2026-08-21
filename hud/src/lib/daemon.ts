@@ -33,6 +33,8 @@ export const lastWake: Writable<WakeHit | null> = writable(null);
 export const lastTurn: Writable<Turn | null> = writable(null);
 export const agentEvents: Writable<AgentEvent[]> = writable([]);
 export const recallDigest: Writable<string> = writable("");
+export const wakeEnabled: Writable<boolean> = writable(true);
+export const pttActive: Writable<boolean> = writable(false);
 
 let unlisteners: UnlistenFn[] = [];
 
@@ -72,6 +74,19 @@ export async function setListening(value: boolean): Promise<void> {
   await sendCommand({ type: "set_listening", value });
 }
 
+export async function setWake(value: boolean): Promise<void> {
+  wakeEnabled.set(value);
+  await sendCommand({ type: "set_wake", value });
+}
+
+export async function startDictation(): Promise<void> {
+  await sendCommand({ type: "start_dictation" });
+}
+
+export async function stopDictation(): Promise<void> {
+  await sendCommand({ type: "stop_dictation" });
+}
+
 function applyDaemonEvent(ev: Record<string, unknown>): void {
   switch (ev.type) {
     case "welcome":
@@ -80,6 +95,8 @@ function applyDaemonEvent(ev: Record<string, unknown>): void {
     case "state":
       listening.set(Boolean(ev.listening));
       status.set(String(ev.status ?? "idle"));
+      wakeEnabled.set(Boolean(ev.wake_enabled));
+      pttActive.set(Boolean(ev.ptt_active));
       break;
     case "levels":
       rms.set(Number(ev.rms ?? 0) * 4);

@@ -13,8 +13,13 @@
     rms,
     status,
     transcript,
+    wakeEnabled,
+    pttActive,
     initDaemon,
     setListening,
+    setWake,
+    startDictation,
+    stopDictation,
     sendCommand,
     type AgentEvent,
   } from "./lib/daemon";
@@ -33,6 +38,10 @@
     void setListening(!$listening);
   }
 
+  function toggleWake() {
+    void setWake(!$wakeEnabled);
+  }
+
   function clearAgentLog() {
     agentEvents.set([]);
   }
@@ -42,6 +51,9 @@
   }
 
   function statusLabel(s: string): string {
+    if ($pttActive) {
+      return "Dictating…";
+    }
     switch (s) {
       case "capturing":
         return "Listening…";
@@ -52,6 +64,21 @@
       default:
         return "Idle";
     }
+  }
+
+  let pttPressed = $state(false);
+
+  function pttDown() {
+    pttPressed = true;
+    void startDictation();
+  }
+
+  function pttUp() {
+    if (!pttPressed) {
+      return;
+    }
+    pttPressed = false;
+    void stopDictation();
   }
 
   onMount(() => {
@@ -68,9 +95,9 @@
   <TitleBar theme={theme} onToggleTheme={toggleTheme} />
 
   <section class="hero">
-    <div class="orb {$status == 'capturing' ? 'capturing' : ''}">
-      <div class="orb-inner {$status == 'capturing' ? 'pulse' : ''}">
-        <span class="mic">{$status == 'capturing' ? '🎙️' : '●'}</span>
+    <div class="orb {$status == 'capturing' || $pttActive ? 'capturing' : ''}">
+      <div class="orb-inner {$status == 'capturing' || $pttActive ? 'pulse' : ''}">
+        <span class="mic">{$status == 'capturing' || $pttActive ? '🎙️' : '●'}</span>
       </div>
       <VuMeter level={$rms} listening={$listening} />
     </div>
@@ -114,6 +141,17 @@
   <footer class="controls">
     <button class="pill primary" onclick={toggleListening}>
       {$status == 'capturing' ? 'Listening…' : $listening ? 'Pause' : 'Resume'}
+    </button>
+    <button
+      class="pill ptt {$pttActive ? 'active' : ''}"
+      onpointerdown={pttDown}
+      onpointerup={pttUp}
+      onpointerleave={pttUp}
+    >
+      {$pttActive ? 'Release to send' : 'Push to talk'}
+    </button>
+    <button class="pill" onclick={toggleWake}>
+      Wake: {$wakeEnabled ? 'on' : 'off'}
     </button>
     <button class="pill" onclick={clearAgentLog}>Clear log</button>
   </footer>
@@ -282,6 +320,11 @@
     background: linear-gradient(135deg, var(--accent), #4a62c4);
     color: #fff;
     border-color: transparent;
+  }
+  .pill.ptt.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--fg);
   }
   .pill:active {
     transform: scale(0.98);

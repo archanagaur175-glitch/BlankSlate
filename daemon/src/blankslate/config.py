@@ -60,6 +60,7 @@ class WakeConfig(_Settings):
     threshold: float = 0.6
     trigger_level: int = 1
     switch_delay_ms: int = 1500
+    enabled: bool = True
 
 
 @dataclass
