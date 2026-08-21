@@ -33,6 +33,4 @@ window-vibrancy = "0.6"
 
 [profile.release]
 panic = "abort"
-codegen-units = 1
-lto = true
 strip = true
