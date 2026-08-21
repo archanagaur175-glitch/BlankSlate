@@ -96,7 +96,7 @@ jobs:
         working-directory: hud
 
       - name: Build HUD installer
-        run: pnpm tauri build --verbose
+        run: pnpm tauri build
         working-directory: hud
 
       - name: Upload release assets
