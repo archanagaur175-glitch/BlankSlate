@@ -308,14 +308,15 @@ pub fn run() {
         .manage(WsState::default())
         .invoke_handler(tauri::generate_handler![send_message, get_daemon_status])
         .plugin(
-            tauri_plugin_single_instance::Builder::new(|app, _argv, _cwd| {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            })
-            .build(),
+            tauri_plugin_single_instance::Builder::new()
+                .callback(|app, _args, _cwd| {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                })
+                .build(),
         )
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

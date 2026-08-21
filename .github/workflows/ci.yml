@@ -69,5 +69,13 @@ jobs:
       - name: Frontend build
         run: pnpm build
 
+      # tauri-build validates the configured bundle resource dirs at codegen
+      # time; the real daemon/ollama are only fetched in the Release job, so
+      # create placeholders here to let `cargo check` succeed.
+      - name: Create placeholder resource dirs
+        run: |
+          mkdir -p src-tauri/resources/ollama src-tauri/resources/daemon
+        shell: bash
+
       - name: Cargo check (Windows)
         run: cargo check --manifest-path src-tauri/Cargo.toml
