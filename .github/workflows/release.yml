@@ -47,7 +47,13 @@ jobs:
         run: |
           $dest = "hud/src-tauri/resources/ollama"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          $tag = (Invoke-RestMethod https://api.github.com/repos/ollama/ollama/releases/latest).tag_name
+          try {
+            $tag = (gh release list --repo ollama/ollama --limit 1 --json tagName --jq '.[0].tagName').Trim()
+            if (-not $tag) { throw "empty tag" }
+          } catch {
+            Write-Warning "could not resolve latest ollama tag via gh ($_); using pinned version"
+            $tag = "v0.11.0"
+          }
           $url = "https://github.com/ollama/ollama/releases/download/$tag/ollama-windows-amd64.zip"
           Write-Output "Downloading Ollama $tag from $url"
           Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ollama.zip"
