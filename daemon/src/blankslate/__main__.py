@@ -27,9 +27,39 @@ def main() -> None:
     if args.log_level:
         config.log_level = args.log_level
 
+    log_dir = config.resolved_data_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        fh = RotatingFileHandler(
+            log_dir / "daemon.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+        )
+        fh.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        handlers.append(fh)
+    except Exception:  # noqa: BLE001
+        pass
     logging.basicConfig(
         level=getattr(logging, config.log_level),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+    )
+
+    # Surface any uncaught exception / thread error to the log file.
+    import sys
+    import threading
+
+    def _log_crash(typ, value, tb):
+        logging.getLogger(__name__).critical(
+            "UNCAUGHT %s: %s", typ.__name__, value, exc_info=(typ, value, tb)
+        )
+
+    sys.excepthook = _log_crash
+    threading.excepthook = lambda args: _log_crash(
+        args.exc_type, args.exc_value, args.exc_traceback
     )
 
     app = DaemonApp(config)

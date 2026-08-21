@@ -472,6 +472,13 @@ class DaemonApp:
     # -------------------------------------------------------------------- commands
 
     async def _handle_message(self, message: dict) -> dict | None:
+        try:
+            return await self._handle_message_inner(message)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("command %r failed: %s", message.get("type"), exc)
+            return {"type": "error", "ok": False, "error": str(exc)}
+
+    async def _handle_message_inner(self, message: dict) -> dict | None:
         kind = message.get("type")
         if kind == "ping":
             return {"type": "pong", "ok": True}

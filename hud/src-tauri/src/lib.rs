@@ -122,7 +122,19 @@ async fn run_session(
                     Some(Ok(Message::Text(text))) => {
                         let _ = app.emit("daemon_event", text);
                     }
-                    _ => break,
+                    // The Python websockets server sends Ping frames to keep the
+                    // connection alive; we must answer with a Pong or it closes
+                    // the socket. Breaking on Ping here was the bug that dropped
+                    // the connection every ~20s and triggered a reconnect loop.
+                    Some(Ok(Message::Ping(p))) => {
+                        if sink.send(Message::Pong(p)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) | None => break,
                 }
             }
             outgoing = rx.recv() => {
