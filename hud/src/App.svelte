@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import TitleBar from "./components/TitleBar.svelte";
   import VuMeter from "./components/VuMeter.svelte";
-  import {
+   import {
     agentEvents,
     connected,
     conDetail,
@@ -15,11 +15,13 @@
     transcript,
     wakeEnabled,
     pttActive,
+    ollamaFetch,
     initDaemon,
     setListening,
     setWake,
     startDictation,
     stopDictation,
+    sendTextMessage,
     sendCommand,
     type AgentEvent,
   } from "./lib/daemon";
@@ -61,11 +63,22 @@
         return "Thinking…";
       case "preparing":
         return "Preparing…";
+      case "engine_error":
+        return "Engine offline";
       case "ready":
         return "Ready";
       default:
         return "Idle";
     }
+  }
+
+  let textDraft = $state("");
+
+  async function submitText() {
+    const t = textDraft.trim();
+    if (!t) return;
+    textDraft = "";
+    await sendTextMessage(t);
   }
 
   let pttPressed = $state(false);
@@ -109,6 +122,25 @@
       <span class="state-text">{$connected ? statusLabel($status) : "daemon offline"}</span>
     </div>
     <span class="detail">{$conDetail}</span>
+    {#if $ollamaFetch}
+      <div class="fetch">
+        <div class="fetch-label">First-run setup: {$ollamaFetch.stage} ({$ollamaFetch.percent}%)</div>
+        <div class="fetch-bar"><div class="fetch-fill" style="width: {$ollamaFetch.percent}%"></div></div>
+      </div>
+    {/if}
+  </section>
+
+  <section class="composer">
+    <input
+      class="text-input"
+      type="text"
+      placeholder="Type a message…"
+      bind:value={textDraft}
+      onkeydown={(e) => {
+        if (e.key === "Enter") submitText();
+      }}
+    />
+    <button class="pill send" onclick={submitText}>Send</button>
   </section>
 
   <section class="feed">
@@ -245,6 +277,26 @@
     margin-top: 4px;
   }
 
+  .fetch {
+    margin-top: 8px;
+  }
+  .fetch-label {
+    color: var(--fg-muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .fetch-bar {
+    height: 6px;
+    border-radius: 4px;
+    background: var(--bg-elev);
+    overflow: hidden;
+  }
+  .fetch-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s ease;
+  }
+
   .feed {
     flex: 1;
     overflow-y: auto;
@@ -331,5 +383,32 @@
   }
   .pill:active {
     transform: scale(0.98);
+  }
+
+  .composer {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 10px;
+  }
+  .text-input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--stroke);
+    background: var(--bg-elev);
+    color: var(--fg);
+    font: inherit;
+    outline: none;
+  }
+  .text-input:focus {
+    border-color: var(--accent);
+  }
+  .pill.send {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, var(--accent), #4a62c4);
+    color: #fff;
+    border-color: transparent;
   }
 </style>

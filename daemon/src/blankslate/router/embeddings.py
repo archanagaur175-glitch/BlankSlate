@@ -46,7 +46,10 @@ class Embedder:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        return await self._impl.embed(texts)
+        logger.info("[stage] embed:start provider=%s n=%d", self.provider, len(texts))
+        out = await self._impl.embed(texts)
+        logger.info("[stage] embed:done dims=%d", len(out[0]) if out else 0)
+        return out
 
 
 class _ProviderEmbedder:

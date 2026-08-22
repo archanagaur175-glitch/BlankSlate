@@ -169,6 +169,19 @@ fn get_daemon_status(ws: State<'_, WsState>) -> ConStatus {
     ws.status.lock().unwrap().clone()
 }
 
+/// Inject a typed message into the daemon at the exact point STT output enters
+/// the pipeline (same downstream path as voice). Lets the HUD offer a text box
+/// and makes the engine testable without a microphone.
+#[tauri::command]
+async fn send_text_message(ws: State<'_, WsState>, text: String) -> Result<(), String> {
+    let payload = serde_json::json!({ "type": "send_text", "text": text }).to_string();
+    let lock = ws.tx.lock().await;
+    let tx = lock
+        .as_ref()
+        .ok_or_else(|| "daemon not connected".to_string())?;
+    tx.send(payload).map_err(|e| e.to_string())
+}
+
 #[cfg(target_os = "windows")]
 fn apply_vibrancy(window: &tauri::WebviewWindow) {
     use window_vibrancy::{apply_acrylic, apply_mica};
@@ -227,19 +240,41 @@ fn init_logging() {
         .try_init();
 }
 
-/// If the installer bundled Ollama under `resources/ollama/`, start its server
-/// so the assistant works with zero manual setup. If Ollama is already running
-/// (e.g. a system install) or no bundle exists, we just connect to it.
-fn launch_ollama(app: &tauri::App) {
-    let res = match app.path().resource_dir() {
-        Ok(dir) => dir,
-        Err(_) => return,
-    };
-    let path = res.join("ollama").join("ollama.exe");
-    if !path.exists() {
-        log::info!("no bundled ollama at {:?}; expecting system ollama", path);
-        return;
+/// Resolve a bundled binary by probing every location the installer/HUD may have
+/// placed it: the Tauri resource directory, its parent (the app root), and the
+/// HUD executable's directory. This single helper replaces the previous hard-coded
+/// `resources/<name>` path so a layout change can never again leave a bundled
+/// asset unfound (e.g. Ollama silently failing to launch).
+fn resolve_bundled_binary(app: &tauri::App, dir_name: &str, exe_name: &str) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join(dir_name).join(exe_name));
+        if let Some(parent) = res.parent() {
+            candidates.push(parent.join(dir_name).join(exe_name));
+        }
     }
+    if let Ok(exe) = app.path().executable_path() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join(dir_name).join(exe_name));
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join(dir_name).join(exe_name));
+            }
+        }
+    }
+    candidates.into_iter().find(|p| p.exists())
+}
+
+/// If the installer bundled Ollama, start its server so the assistant works with
+/// zero manual setup. If Ollama is already running (e.g. a system install) or no
+/// bundle exists, we just connect to it.
+fn launch_ollama(app: &tauri::App) {
+    let path = match resolve_bundled_binary(app, "ollama", "ollama.exe") {
+        Some(p) => p,
+        None => {
+            log::info!("no bundled ollama found; expecting a system ollama install");
+            return;
+        }
+    };
     if ollama_up() {
         log::info!("ollama already running; using existing instance");
         return;
@@ -282,16 +317,14 @@ fn kill_process(_name: &str) {}
 /// it so the HUD is fully self-contained. If no bundled binary exists we assume
 /// an external daemon is already running and connect to it instead.
 fn launch_bundled_daemon(app: &tauri::App) {
-    let res = match app.path().resource_dir() {
-        Ok(dir) => dir,
-        Err(_) => return,
-    };
     let exe = if cfg!(windows) { "blankslate.exe" } else { "blankslate" };
-    let path = res.join("daemon").join(exe);
-    if !path.exists() {
-        log::info!("no bundled daemon at {:?}; expecting external daemon", path);
-        return;
-    }
+    let path = match resolve_bundled_binary(app, "daemon", exe) {
+        Some(p) => p,
+        None => {
+            log::info!("no bundled daemon found; expecting an external daemon");
+            return;
+        }
+    };
     match std::process::Command::new(&path).spawn() {
         Ok(child) => {
             log::info!("launched bundled daemon from {:?}", path);
@@ -306,7 +339,7 @@ pub fn run() {
     init_logging();
     let app = tauri::Builder::default()
         .manage(WsState::default())
-        .invoke_handler(tauri::generate_handler![send_message, get_daemon_status])
+        .invoke_handler(tauri::generate_handler![send_message, get_daemon_status, send_text_message])
         .plugin(
             tauri_plugin_single_instance::Builder::new()
                 .callback(|app, _args, _cwd| {

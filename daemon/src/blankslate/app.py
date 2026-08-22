@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 
 import numpy as np
@@ -28,6 +29,8 @@ from blankslate.memory import HistoryStore
 from blankslate.memory.digest import Digester
 from blankslate.nlu.intent import IntentJudge
 from blankslate.nlu.planner import TaskPlanner
+from blankslate.ollama_fetch import ensure_ollama
+from blankslate.resources import register_ollama_data_dir, resolve_ollama_binary
 from blankslate.router.embeddings import Embedder
 from blankslate.router.tool_router import ToolRouter
 from blankslate.security.redactor import Redactor
@@ -66,6 +69,9 @@ class DaemonApp:
         self._ptt_detector: UtteranceDetector | None = None
         self._hotkey_mgr: HotkeyManager | None = None
         self._state: str = "idle"
+        self._ollama_proc: asyncio.subprocess.Process | None = None
+        self._supervisor_task: asyncio.Task | None = None
+        self._engine_ok: bool = True
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -76,14 +82,47 @@ class DaemonApp:
         self._ipc.on_message = self._handle_message
         await self._ipc.start()
         self._ipc.write_info_file(self.config.ipc_path())
+        await self._ipc.broadcast(
+            {"type": "state", "listening": True, "status": "preparing", "wake_enabled": self._wake_enabled, "ptt_active": False}
+        )
+        # First-run Ollama fetch (Option A): reuse a system install, otherwise
+        # download into the data dir. Progress is streamed to the HUD.
+        ollama_dir = self.config.resolved_data_dir() / "ollama"
+        register_ollama_data_dir(ollama_dir)
+        try:
+            await ensure_ollama(ollama_dir, progress=self._ollama_fetch_progress)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ollama fetch failed; relying on system install / recovery: %s", exc)
+            await self._ipc.broadcast(
+                {"type": "ollama_fetch", "stage": "error", "percent": 0, "eta": 0}
+            )
         await self._ensure_models()
-        await self._ipc.broadcast({"type": "state", "listening": True, "status": "ready"})
+        # Report a distinct, honest state instead of assuming "ready" just because
+        # the daemon process started. If the local engine never came up, surface
+        # that to the HUD rather than leaving it stuck on "Thinking…" later.
+        healthy = await self._ollama_healthy()
+        if not healthy:
+            await self._recover_ollama()
+            healthy = await self._ollama_healthy()
+        status = "ready" if healthy else "engine_error"
+        detail = "" if healthy else "Local AI engine not responding — retrying"
+        await self._ipc.broadcast(
+            {"type": "state", "listening": True, "status": status, "wake_enabled": self._wake_enabled, "ptt_active": False}
+        )
+        if detail:
+            await self._ipc.broadcast({"type": "daemon_status", "connected": False, "detail": detail})
         self._start_pipeline()
+        self._supervisor_task = asyncio.create_task(self._ollama_supervise())
         logger.info("BlankSlate daemon ready (%s)", self.config.resolved_data_dir())
         try:
             await self._shutdown.wait()
         finally:
             await self._stop()
+
+    async def _ollama_fetch_progress(self, stage: str, percent: int, eta: float | None) -> None:
+        await self._ipc.broadcast(
+            {"type": "ollama_fetch", "stage": stage, "percent": int(percent), "eta": float(eta or 0)}
+        )
 
     # ----------------------------------------------------- model bootstrap
     async def _ensure_models(self) -> None:
@@ -100,10 +139,12 @@ class DaemonApp:
         await self._ipc.broadcast(
             {"type": "daemon_status", "connected": True, "detail": "Preparing models…"}
         )
-        # Wait for Ollama to come up (the bundled server may still be booting).
-        for _ in range(180):
+        # Bounded wait for Ollama to come up (the bundled server may still be
+        # booting). We never block forever here — the supervisor task keeps
+        # watching and the HUD gets an explicit error state if it stays down.
+        for _ in range(30):
             try:
-                r = await asyncio.to_thread(requests.get, f"{base}/api/tags", timeout=3)
+                r = await asyncio.to_thread(requests.get, f"{base}/api/version", timeout=3)
                 if r.status_code == 200:
                     break
             except Exception:
@@ -125,6 +166,69 @@ class DaemonApp:
                 {"type": "daemon_status", "connected": True, "detail": f"Pulling {model}…"}
             )
             await asyncio.to_thread(self._pull_model_sync, base, model)
+
+    # ----------------------------------------------------- ollama liveness
+    async def _ollama_healthy(self, timeout: float = 3.0) -> bool:
+        """Lightweight health probe with a hard timeout — never blocks forever."""
+        base = self.config.llm.base_url
+        try:
+            r = await asyncio.to_thread(
+                requests.get, f"{base}/api/version", timeout=timeout
+            )
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    async def _recover_ollama(self) -> None:
+        """Attempt a one-shot relaunch of the Ollama server if it is gone."""
+        if await self._ollama_healthy():
+            return
+        binary = resolve_ollama_binary()
+        if not binary:
+            logger.warning("ollama recovery: no ollama binary found; cannot auto-relaunch")
+            return
+        try:
+            env = {**os.environ, "OLLAMA_HOST": "127.0.0.1:11434"}
+            self._ollama_proc = await asyncio.create_subprocess_exec(
+                binary, "serve",
+                env=env,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            logger.info("ollama recovery: launched %s (pid %s)", binary, self._ollama_proc.pid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ollama recovery: failed to launch %s: %s", binary, exc)
+
+    async def _ollama_supervise(self) -> None:
+        """Watch the local engine and flip the HUD state if it dies mid-session.
+
+        This is what makes the "kill ollama mid-session" acceptance test pass:
+        the HUD shows an explicit error instead of staying on "Thinking…".
+        """
+        while not self._shutdown.is_set():
+            ok = await self._ollama_healthy()
+            if ok != self._engine_ok:
+                self._engine_ok = ok
+                if not ok and self._agent_available:
+                    logger.warning("local AI engine became unreachable")
+                    await self._ipc.broadcast(
+                        {
+                            "type": "state",
+                            "listening": self.listening,
+                            "status": "engine_error",
+                            "wake_enabled": self._wake_enabled,
+                            "ptt_active": self._ptt_active,
+                        }
+                    )
+                    await self._ipc.broadcast(
+                        {"type": "daemon_status", "connected": False, "detail": "Local AI engine not responding — retrying"}
+                    )
+                elif ok:
+                    await self._broadcast_state("ready")
+                    await self._ipc.broadcast(
+                        {"type": "daemon_status", "connected": True, "detail": ""}
+                    )
+            await asyncio.sleep(5)
 
     def _pull_model_sync(self, base: str, model: str) -> None:
         loop = self._loop
@@ -172,6 +276,17 @@ class DaemonApp:
             try:
                 await self._pipeline_task
             except asyncio.CancelledError:
+                pass
+        if self._supervisor_task is not None:
+            self._supervisor_task.cancel()
+            try:
+                await self._supervisor_task
+            except asyncio.CancelledError:
+                pass
+        if self._ollama_proc is not None:
+            try:
+                self._ollama_proc.terminate()
+            except Exception:  # noqa: BLE001
                 pass
         await self._ipc.stop()
 
@@ -398,12 +513,13 @@ class DaemonApp:
         level = float(np.sqrt(np.mean(np.square(chunk))))
         await self._ipc.broadcast({"type": "levels", "rms": round(level, 4)})
 
-    async def _broadcast_state(self, status: str) -> None:
+    async def _broadcast_state(self, status: str, detail: str = "") -> None:
         await self._ipc.broadcast(
             {
                 "type": "state",
                 "listening": self.listening,
                 "status": status,
+                "detail": detail,
                 "wake_enabled": self._wake_enabled,
                 "ptt_active": self._ptt_active,
             }
@@ -472,6 +588,19 @@ class DaemonApp:
                 await asyncio.to_thread(self._tts.speak, text)
             return
 
+        # P2: never commit to a turn if the local engine is down. One recovery
+        # attempt, then surface an explicit error state instead of hanging on
+        # "Thinking…".
+        if not await self._ollama_healthy():
+            await self._recover_ollama()
+        if not await self._ollama_healthy():
+            logger.warning("engine unreachable before turn; reporting error state")
+            await self._broadcast_state("engine_error", "Local AI engine not responding — retrying")
+            await self._ipc.broadcast(
+                {"type": "agent.agent_reply", "text": "[error] Local AI engine not responding — retrying"}
+            )
+            return
+
         intent = await self._judge.judge(text)
         await self._ipc.broadcast({"type": "intent", **intent.to_dict(), "source_input": source})
         if not intent.directed:
@@ -485,7 +614,16 @@ class DaemonApp:
                 if row["role"] in ("user", "assistant")
             ]
 
-        reply = await self._agent.handle(intent.query, history_turns)
+        try:
+            reply = await self._agent.handle(intent.query, history_turns)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("agent turn failed: %s", exc)
+            await self._broadcast_state("engine_error", f"Local AI engine error: {exc}")
+            await self._ipc.broadcast(
+                {"type": "agent.agent_reply", "text": f"[error] {exc}"}
+            )
+            return
+
         if self._history is not None:
             self._history.append("user", intent.query, source=source)
             self._history.append("assistant", reply or "")
@@ -494,6 +632,19 @@ class DaemonApp:
             await self._ipc.broadcast({"type": "recall_digest", "summary": summary})
         if reply and self._tts is not None:
             await asyncio.to_thread(self._tts.speak, reply)
+
+    # P5: typed-message entry point, injected at the same point STT output
+    # would enter. Called by the HUD's send_text_message IPC command.
+    async def send_text(self, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+        await self._broadcast_state("processing")
+        await self._route_text(text, source="text")
+        # _route_text reports engine_error on failure; only return to "ready"
+        # when the local engine is actually reachable.
+        if await self._ollama_healthy():
+            await self._broadcast_state("ready")
 
     # -------------------------------------------------------------------- commands
 
@@ -523,6 +674,16 @@ class DaemonApp:
             await self._broadcast_state(
                 "capturing" if self._state in ("capturing", "ptt") else "ready"
             )
+            return {"type": "ack", "ok": True}
+        if kind == "send_text":
+            text = (message.get("text") or "").strip()
+            if text:
+                await self._broadcast_state("processing")
+                await self._route_text(text, source="text")
+                # _route_text reports engine_error on failure; only return to
+                # "ready" when the local engine is actually reachable.
+                if await self._ollama_healthy():
+                    await self._broadcast_state("ready")
             return {"type": "ack", "ok": True}
         if kind == "get_state":
             return {

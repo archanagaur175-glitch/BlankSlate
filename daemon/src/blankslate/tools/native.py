@@ -211,6 +211,7 @@ class NativeToolRunner:
         return list(NATIVE_TOOLS) + list(WINDOW_TOOLS)
 
     async def run(self, name: str, arguments: dict) -> str:
+        logger.info("[stage] tool_dispatch:start name=%s", name)
         coro = _dispatch(name, arguments, self.data_dir)
         if coro is None:
             coro = window_dispatch(name, arguments, self.data_dir)
@@ -218,6 +219,7 @@ class NativeToolRunner:
             if coro is None:
                 return f"Unknown tool: {name}"
             text = await coro
+            logger.info("[stage] tool_dispatch:done name=%s", name)
             return str(text)
         except Exception as exc:  # noqa: BLE001
             logger.exception("tool %s failed", name)

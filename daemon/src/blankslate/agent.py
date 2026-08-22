@@ -109,13 +109,15 @@ class Agent:
         return merged or "\n".join(steps)
 
     async def _execute(self, query: str, history: list[dict]) -> str:
+        logger.info("[stage] execute:start query=%r", query[:120])
         messages: list[dict] = [{"role": "system", "content": self.options.system_prompt}]
         messages.extend(history[-8:])
         messages.append({"role": "user", "content": query})
 
         specs = await self._collect_specs()
         last_content = ""
-        for _ in range(self.options.max_iterations):
+        for step in range(self.options.max_iterations):
+            logger.info("[stage] llm_call:start step=%d", step)
             selected = await self.router.select(query, specs)
             schemas = [s.to_schema() for s in selected]
             result = await self.llm.chat(
@@ -123,11 +125,17 @@ class Agent:
                 tools=schemas or None,
                 temperature=self.options.temperature,
             )
+            logger.info(
+                "[stage] llm_call:done step=%d tools=%d",
+                step,
+                len(result.tool_calls),
+            )
 
             if not result.tool_calls:
                 reply = (result.content or "").strip()
                 last_content = reply
                 await self._emit("agent_reply", {"text": reply})
+                logger.info("[stage] execute:done (direct reply)")
                 return reply
 
             assistant_msg: dict = {"role": "assistant", "content": result.content or ""}
@@ -145,7 +153,9 @@ class Agent:
 
             for call in result.tool_calls:
                 await self._emit("tool_call", {"name": call.name, "arguments": call.arguments})
+                logger.info("[stage] tool_exec:start name=%s", call.name)
                 output = await self._run_tool(call.name, call.arguments)
+                logger.info("[stage] tool_exec:done name=%s bytes=%d", call.name, len(output or ""))
                 messages.append(
                     {
                         "role": "tool",
@@ -156,4 +166,5 @@ class Agent:
                 last_content = output
 
         await self._emit("agent_reply", {"text": last_content})
+        logger.info("[stage] execute:done (max iterations)")
         return last_content or "I ran out of iterations trying to complete that."

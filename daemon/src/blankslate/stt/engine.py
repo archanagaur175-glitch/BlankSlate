@@ -3,41 +3,22 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
 from abc import ABC, abstractmethod
 
 import numpy as np
 
+from blankslate.resources import resolve_stt_model
+
 logger = logging.getLogger(__name__)
 
 
-def _bundled_models_root() -> str:
-    """Resolve the directory that holds bundled ML models.
-
-    In the PyInstaller build the models live under ``sys._MEIPASS``; in a source
-    checkout they live under ``blankslate/resources/models``. Falling back to a
-    HuggingFace model name (which triggers a download) keeps dev workflows working.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))  # .../blankslate/stt
-    pkg_root = os.path.dirname(here)  # .../blankslate
-    candidates = []
-    meipass = getattr(sys, "_MEIPASS", "")
-    if meipass:
-        candidates.append(os.path.join(meipass, "blankslate", "resources", "models"))
-    candidates.append(os.path.join(pkg_root, "resources", "models"))
-    for candidate in candidates:
-        if os.path.isdir(candidate):
-            return candidate
-    return candidates[-1]
-
-
 def _resolve_whisper_model(model: str) -> str:
-    """Return a local model directory when bundled, else the HF model name."""
-    local = os.path.join(_bundled_models_root(), f"faster-whisper-{model}")
-    if os.path.isdir(local) and os.path.exists(os.path.join(local, "model.bin")):
-        return local
-    return model
+    """Return a local model directory when bundled, else the HF model name.
+
+    Delegates to the single resource resolver so there is exactly one place that
+    knows how to find bundled assets.
+    """
+    return resolve_stt_model(model)
 
 
 class STTEngine(ABC):

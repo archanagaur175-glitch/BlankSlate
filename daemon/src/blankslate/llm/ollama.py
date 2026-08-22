@@ -40,6 +40,15 @@ class OllamaProvider(LLMProvider):
         except httpx.HTTPError:
             return False
 
+    async def health(self, timeout: float = 3.0) -> bool:
+        """Lightweight liveness probe with its own short timeout."""
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{self.base_url}{_VERSION}")
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
     async def chat(
         self,
         messages: list[dict],

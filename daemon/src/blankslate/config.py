@@ -127,7 +127,8 @@ class ToolRouterConfig(_Settings):
 
 @dataclass
 class DictationConfig(_Settings):
-    hotkey: str = "<ctrl>+<alt>+d"
+    # Plain key names accepted by the `keyboard` library (no angle brackets).
+    hotkey: str = "ctrl+alt+d"
     hold_to_talk: bool = True
     model: str = "base.en"
     language: str | None = None

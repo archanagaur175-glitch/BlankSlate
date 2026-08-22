@@ -38,8 +38,11 @@ class TaskPlanner:
         query = (query or "").strip()
         if not query:
             return []
+        logger.info("[stage] planner:start query=%r", query[:120])
         if self.llm is None:
-            return self._heuristic_split(query)
+            steps = self._heuristic_split(query)
+            logger.info("[stage] planner:done steps=%d (heuristic)", len(steps))
+            return steps
         try:
             result = await self.llm.chat(
                 messages=[
@@ -50,11 +53,14 @@ class TaskPlanner:
             )
             parsed = extract_json(result.content)
             if parsed is None:
+                logger.info("[stage] planner:done steps=1 (no json)")
                 return [query]
             steps = parsed.get("plan") or []
             if not isinstance(steps, list):
+                logger.info("[stage] planner:done steps=1 (bad shape)")
                 return [query]
             clean = [str(s).strip() for s in steps if str(s).strip()]
+            logger.info("[stage] planner:done steps=%d", len(clean or [query]))
             return clean or [query]
         except Exception as exc:  # noqa: BLE001
             logger.warning("planner LLM failed (%s); using heuristic split", exc)

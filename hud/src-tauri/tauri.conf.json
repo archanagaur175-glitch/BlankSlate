@@ -43,8 +43,7 @@
     "shortDescription": "BlankSlate HUD",
     "longDescription": "A private, local-first AI voice assistant overlay.",
     "resources": {
-      "resources/daemon/": "daemon",
-      "resources/ollama/": "ollama"
+      "resources/daemon/": "daemon"
     },
     "windows": {
       "wix": {

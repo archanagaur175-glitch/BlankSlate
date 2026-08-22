@@ -35,6 +35,8 @@ export const agentEvents: Writable<AgentEvent[]> = writable([]);
 export const recallDigest: Writable<string> = writable("");
 export const wakeEnabled: Writable<boolean> = writable(true);
 export const pttActive: Writable<boolean> = writable(false);
+export const ollamaFetch: Writable<{ stage: string; percent: number; eta: number } | null> =
+  writable(null);
 
 let unlisteners: UnlistenFn[] = [];
 
@@ -87,17 +89,24 @@ export async function stopDictation(): Promise<void> {
   await sendCommand({ type: "stop_dictation" });
 }
 
+export async function sendTextMessage(text: string): Promise<void> {
+  await sendCommand({ type: "send_text", text });
+}
+
 function applyDaemonEvent(ev: Record<string, unknown>): void {
   switch (ev.type) {
     case "welcome":
       status.set("ready");
       break;
-    case "state":
-      listening.set(Boolean(ev.listening));
-      status.set(String(ev.status ?? "idle"));
-      wakeEnabled.set(Boolean(ev.wake_enabled));
-      pttActive.set(Boolean(ev.ptt_active));
-      break;
+      case "state":
+        listening.set(Boolean(ev.listening));
+        status.set(String(ev.status ?? "idle"));
+        wakeEnabled.set(Boolean(ev.wake_enabled));
+        pttActive.set(Boolean(ev.ptt_active));
+        if (String(ev.status ?? "") !== "preparing") {
+          ollamaFetch.set(null);
+        }
+        break;
     case "levels":
       rms.set(Number(ev.rms ?? 0) * 4);
       break;
@@ -120,9 +129,16 @@ function applyDaemonEvent(ev: Record<string, unknown>): void {
         // visible only for debugging; keep the UI clean otherwise
       }
       break;
-    case "recall_digest":
-      recallDigest.set(String(ev.summary ?? ""));
-      break;
+      case "recall_digest":
+        recallDigest.set(String(ev.summary ?? ""));
+        break;
+      case "ollama_fetch":
+        ollamaFetch.set({
+          stage: String(ev.stage ?? ""),
+          percent: Number(ev.percent ?? 0),
+          eta: Number(ev.eta ?? 0),
+        });
+        break;
     case "agent.agent_start": {
       agentEvents.update((list) => [
         ...list,

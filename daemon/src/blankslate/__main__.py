@@ -9,6 +9,7 @@ from pathlib import Path
 
 from blankslate.app import DaemonApp
 from blankslate.config import DaemonConfig
+from blankslate.config_validation import fail_loudly
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -26,6 +27,10 @@ def main() -> None:
         config.data_dir = str(Path(args.config).parent)
     if args.log_level:
         config.log_level = args.log_level
+
+    # Surface config mismatches (hotkey, wake model, …) loudly at launch instead
+    # of letting registration fail silently later.
+    fail_loudly(config)
 
     log_dir = config.resolved_data_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
