@@ -3,11 +3,41 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from abc import ABC, abstractmethod
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _bundled_models_root() -> str:
+    """Resolve the directory that holds bundled ML models.
+
+    In the PyInstaller build the models live under ``sys._MEIPASS``; in a source
+    checkout they live under ``blankslate/resources/models``. Falling back to a
+    HuggingFace model name (which triggers a download) keeps dev workflows working.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))  # .../blankslate/stt
+    pkg_root = os.path.dirname(here)  # .../blankslate
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        candidates.append(os.path.join(meipass, "blankslate", "resources", "models"))
+    candidates.append(os.path.join(pkg_root, "resources", "models"))
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return candidates[-1]
+
+
+def _resolve_whisper_model(model: str) -> str:
+    """Return a local model directory when bundled, else the HF model name."""
+    local = os.path.join(_bundled_models_root(), f"faster-whisper-{model}")
+    if os.path.isdir(local) and os.path.exists(os.path.join(local, "model.bin")):
+        return local
+    return model
 
 
 class STTEngine(ABC):
@@ -52,9 +82,10 @@ class FasterWhisperEngine(STTEngine):
         if device == "auto":
             device = "cuda" if _ctranslate2_cuda_available() else "cpu"
         self._device = device
-        logger.info("STT loading %s on %s (%s)", self.model, device, self.compute)
+        model_ref = _resolve_whisper_model(self.model)
+        logger.info("STT loading %s on %s (%s)", model_ref, device, self.compute)
         try:
-            self._model = WhisperModel(self.model, device=device, compute_type=self.compute)
+            self._model = WhisperModel(model_ref, device=device, compute_type=self.compute)
         except Exception as exc:  # noqa: BLE001
             if device != "cpu":
                 logger.warning("STT CUDA load failed (%s); falling back to CPU", exc)

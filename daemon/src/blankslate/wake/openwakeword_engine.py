@@ -71,12 +71,21 @@ class OpenWakeWordEngine(WakeEngine):
     def _ensure_model(self) -> None:
         if self._ww is not None:
             return
+        wake_cls = _wakeword_class()
         if self.model in BUILTIN_MODELS:
-            self._ww = _wakeword_class()(enable=[self.model])
-            logger.info("wake engine loaded builtin model %r", self.model)
+            # The bundled ONNX runtime (onnxruntime) is preferred over tflite so the
+            # daemon stays self-contained; the .onnx model files ship inside the package.
+            self._ww = wake_cls(
+                wakeword_models=[self.model],
+                inference_framework="onnx",
+            )
+            logger.info("wake engine loaded builtin model %r (onnx)", self.model)
         elif Path(self.model).exists():
-            self._ww = _wakeword_class()(model_paths=[str(self.model)])
-            logger.info("wake engine loaded model from %r", self.model)
+            self._ww = wake_cls(
+                wakeword_models=[str(self.model)],
+                inference_framework="onnx",
+            )
+            logger.info("wake engine loaded model from %r (onnx)", self.model)
         else:
             raise FileNotFoundError(f"wake model {self.model!r} not found and not a builtin model")
 

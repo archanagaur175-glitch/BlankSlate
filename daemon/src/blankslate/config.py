@@ -129,7 +129,7 @@ class ToolRouterConfig(_Settings):
 class DictationConfig(_Settings):
     hotkey: str = "<ctrl>+<alt>+d"
     hold_to_talk: bool = True
-    model: str = "small.en"
+    model: str = "base.en"
     language: str | None = None
     end_silence_ms: int = 700
     max_utterance_ms: int = 120000

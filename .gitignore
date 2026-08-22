@@ -25,6 +25,8 @@ hud/src-tauri/resources/ollama/
 # Local data (never commit user data or models)
 *.log
 blankslate-data/
+# Downloaded ML models (fetched at build time by daemon/build_daemon.ps1)
+daemon/models/
 
 # OS
 Thumbs.db

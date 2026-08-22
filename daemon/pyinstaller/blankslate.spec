@@ -62,6 +62,22 @@ for pkg in BUNDLE_PACKAGES:
     binaries.extend(b)
     hiddenimports.extend(h)
 
+# Bundle local ML models so the daemon is fully offline (no HuggingFace/GitHub
+# downloads at runtime, which are unreliable behind the frozen interpreter).
+# The STT model is placed under blankslate/resources/models and the openwakeword
+# models under openwakeword/resources/models to match the paths the libraries
+# resolve at runtime. build_daemon.ps1 populates DAEMON_ROOT/models beforehand.
+MODELS_SRC = os.path.join(DAEMON_ROOT, "models")
+if os.path.isdir(MODELS_SRC):
+    stt_models = os.path.join(MODELS_SRC, "faster-whisper-base.en")
+    if os.path.isdir(stt_models):
+        datas.append((stt_models, "blankslate/resources/models/faster-whisper-base.en"))
+    ow_models = os.path.join(MODELS_SRC, "openwakeword")
+    if os.path.isdir(ow_models):
+        datas.append((ow_models, "openwakeword/resources/models"))
+else:
+    print("warning: daemon/models not found; models will be downloaded at runtime (may fail)")
+
 a = Analysis(
     [os.path.join(SRC, "blankslate", "__main__.py")],
     pathex=[SRC],

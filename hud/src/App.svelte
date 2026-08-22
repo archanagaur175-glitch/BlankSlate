@@ -72,6 +72,7 @@
 
   function pttDown() {
     pttPressed = true;
+    pttActive.set(true);
     void startDictation();
   }
 
