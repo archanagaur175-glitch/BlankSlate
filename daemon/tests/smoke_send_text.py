@@ -121,7 +121,9 @@ async def _ensure_ollama_running() -> tuple[str, subprocess.Popen | None, Path]:
 
 
 async def run_smoke() -> None:
+    print("[smoke] locating/starting Ollama…", flush=True)
     binary, proc, models_dir = await _ensure_ollama_running()
+    print(f"[smoke] Ollama up via {binary}", flush=True)
     base_url = f"http://{OLLAMA_HOST}"
     try:
         cfg = DaemonConfig()
@@ -133,6 +135,7 @@ async def run_smoke() -> None:
         cfg.demo_echo = False
         data_dir = (Path.home() / ".blankslate_smoke_tmp" / "data")
         cfg.data_dir = str(data_dir)
+        cfg.ensure_dirs()
         register_ollama_data_dir(data_dir / "ollama")
 
         app = DaemonApp(cfg)
@@ -141,9 +144,12 @@ async def run_smoke() -> None:
         app._judge = StubJudge("")
         app._build_agent_stack()
         app._agent_available = True
+        app._loop = asyncio.get_running_loop()
 
+        print(f"[smoke] ensuring models ({SMALL_MODEL}, {EMBED_MODEL})…", flush=True)
         await app._ensure_models()
         assert await app._ollama_healthy(), "Ollama not healthy before prompt"
+        print("[smoke] models ready; sending canned prompt…", flush=True)
 
         start = time.time()
         await app.send_text(PROMPT)
@@ -161,7 +167,7 @@ async def run_smoke() -> None:
             await asyncio.sleep(0.5)
 
         assert reply is not None, "No real LLM response received within timeout"
-        print(f"SMOKE OK: got response: {reply!r}")
+        print(f"SMOKE OK: got response: {reply!r}", flush=True)
     finally:
         if proc is not None:
             try:

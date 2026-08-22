@@ -28,6 +28,11 @@ blankslate-data/
 # Downloaded ML models (fetched at build time by daemon/build_daemon.ps1)
 daemon/models/
 
+# Ollama run/smoke-test artifacts (created when Ollama is launched locally)
+daemon/ollama_fetch/
+daemon/ollama_models/
+.blankslate_smoke_tmp/
+
 # OS
 Thumbs.db
 .DS_Store
