@@ -141,8 +141,9 @@ async def run_smoke() -> None:
         app = DaemonApp(cfg)
         app._ipc = FakeIpc()
         app._tts = StubTTS()
-        app._judge = StubJudge("")
         app._build_agent_stack()
+        # Set AFTER _build_agent_stack, which installs its own IntentJudge.
+        app._judge = StubJudge("")
         app._agent_available = True
         app._loop = asyncio.get_running_loop()
 
@@ -166,6 +167,10 @@ async def run_smoke() -> None:
                 break
             await asyncio.sleep(0.5)
 
+        if reply is None:
+            print("[smoke] TIMEOUT — dumping all IPC messages:", flush=True)
+            for m in app._ipc.messages:
+                print("  ", m, flush=True)
         assert reply is not None, "No real LLM response received within timeout"
         print(f"SMOKE OK: got response: {reply!r}", flush=True)
     finally:
