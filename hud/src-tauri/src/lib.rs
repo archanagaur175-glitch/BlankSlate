@@ -253,12 +253,10 @@ fn resolve_bundled_binary(app: &tauri::App, dir_name: &str, exe_name: &str) -> O
             candidates.push(parent.join(dir_name).join(exe_name));
         }
     }
-    if let Ok(exe) = app.path().executable_path() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join(dir_name).join(exe_name));
-            if let Some(parent) = exe_dir.parent() {
-                candidates.push(parent.join(dir_name).join(exe_name));
-            }
+    if let Ok(exe_dir) = app.path().executable_dir() {
+        candidates.push(exe_dir.join(dir_name).join(exe_name));
+        if let Some(parent) = exe_dir.parent() {
+            candidates.push(parent.join(dir_name).join(exe_name));
         }
     }
     candidates.into_iter().find(|p| p.exists())
