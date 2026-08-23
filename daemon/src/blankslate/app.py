@@ -401,8 +401,11 @@ class DaemonApp:
             logger.warning("push-to-talk hotkey disabled: %s", exc)
             self._hotkey_mgr = None
 
-        if self._stt is not None:
-            self._pipeline_task = asyncio.create_task(self._listen_loop())
+        # Always start the listen loop so push-to-talk / wake are acknowledged
+        # even when STT failed to construct. The loop guards STT usage internally
+        # and still finalizes + returns to "ready", so the HUD never hangs on a
+        # stuck "Release to send" state.
+        self._pipeline_task = asyncio.create_task(self._listen_loop())
 
     # ------------------------------------------------------------------- pipeline
 
@@ -603,7 +606,14 @@ class DaemonApp:
 
         intent = await self._judge.judge(text)
         await self._ipc.broadcast({"type": "intent", **intent.to_dict(), "source_input": source})
-        if not intent.directed:
+
+        # Input reaching this point has already been gated upstream (a wake word
+        # or the push-to-talk button triggered capture, or it came from the typed
+        # box), so it is always a deliberate user turn. Do NOT discard it on the
+        # heuristic "not directed" result — just use the (wake-stripped) query,
+        # falling back to the raw text if the judge stripped everything.
+        query = (intent.query or text).strip()
+        if not query:
             return
 
         history_turns = []
@@ -625,7 +635,7 @@ class DaemonApp:
             return
 
         if self._history is not None:
-            self._history.append("user", intent.query, source=source)
+            self._history.append("user", query, source=source)
             self._history.append("assistant", reply or "")
         if self._digest is not None and self.config.context.digest_on:
             summary = await self._digest.digest(f"User: {text}\nAssistant: {reply or ''}")
