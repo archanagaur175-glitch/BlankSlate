@@ -280,6 +280,10 @@ fn launch_ollama(app: &tauri::App) {
     match std::process::Command::new(&path)
         .arg("serve")
         .env("OLLAMA_HOST", "127.0.0.1:11434")
+        .env("OLLAMA_KEEP_ALIVE", "30m")
+        .env("OLLAMA_MAX_LOADED_MODELS", "2")
+        .env("OLLAMA_NUM_PARALLEL", "1")
+        .env("OLLAMA_CONTEXT_LENGTH", "4096")
         .spawn()
     {
         Ok(child) => {
@@ -323,7 +327,10 @@ fn launch_bundled_daemon(app: &tauri::App) {
             return;
         }
     };
-    match std::process::Command::new(&path).spawn() {
+    match std::process::Command::new(&path)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn() {
         Ok(child) => {
             log::info!("launched bundled daemon from {:?}", path);
             *app.state::<WsState>().daemon_child.lock().unwrap() = Some(child);

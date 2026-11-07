@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Freeze the BlankSlate daemon into a standalone, distributable folder.
+"""Freeze the BlankSlate daemon (vendored isair/jarvis fork) into a standalone folder.
 
 Run from the ``daemon/`` directory:
 
@@ -22,12 +22,19 @@ if SPEC_PATH:
     DAEMON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPEC_PATH)))
 else:
     DAEMON_ROOT = os.getcwd()
-SRC = os.path.join(DAEMON_ROOT, "src")
+
+# The vendored jarvis package lives at <DAEMON_ROOT>/jarvis/jarvis; its parent
+# (<DAEMON_ROOT>/jarvis) is what needs to be importable as ``jarvis``.
+JARVIS_PARENT = os.path.join(DAEMON_ROOT, "jarvis")
+if JARVIS_PARENT not in sys.path:
+    sys.path.insert(0, JARVIS_PARENT)
+
+ENTRY = os.path.join(JARVIS_PARENT, "run_blankslate.py")
 
 # The daemon imports its heavy ML dependencies lazily at runtime, so PyInstaller
 # cannot discover them from a static scan. Collect them explicitly. Kokoro/Torch
-# are excluded on purpose; the daemon falls back to the offline Windows SAPI
-# voice when they are absent, keeping the bundle lean.
+# are excluded on purpose: TTS is disabled in the bundled config and the
+# Chatterbox backend imports torch lazily, so the bundle stays lean and torch-free.
 BUNDLE_PACKAGES = [
     "faster_whisper",
     "ctranslate2",
@@ -43,15 +50,26 @@ BUNDLE_PACKAGES = [
     "pywinauto",
     "Pillow",
     "psutil",
-    "ddgs",
     "mcp",
     "httpx",
     "anyio",
+    "pynput",
+    "pygame",
+    "rapidfuzz",
+    "pytesseract",
+    "geoip2",
+    "miniupnpc",
+    "faiss",
+    "bs4",
+    "html2text",
+    "websockets",
+    "python-dotenv",
+    "requests",
 ]
 
 datas = []
 binaries = []
-hiddenimports = list(collect_submodules("blankslate"))
+hiddenimports = []
 for pkg in BUNDLE_PACKAGES:
     try:
         d, b, h = collect_all(pkg)
@@ -62,31 +80,26 @@ for pkg in BUNDLE_PACKAGES:
     binaries.extend(b)
     hiddenimports.extend(h)
 
-# Bundle local ML models so the daemon is fully offline (no HuggingFace/GitHub
-# downloads at runtime, which are unreliable behind the frozen interpreter).
-# The STT model is placed under blankslate/resources/models and the openwakeword
-# models under openwakeword/resources/models to match the paths the libraries
-# resolve at runtime. build_daemon.ps1 populates DAEMON_ROOT/models beforehand.
-MODELS_SRC = os.path.join(DAEMON_ROOT, "models")
-if os.path.isdir(MODELS_SRC):
-    stt_models = os.path.join(MODELS_SRC, "faster-whisper-base.en")
-    if os.path.isdir(stt_models):
-        datas.append((stt_models, "blankslate/resources/models/faster-whisper-base.en"))
-    ow_models = os.path.join(MODELS_SRC, "openwakeword")
-    if os.path.isdir(ow_models):
-        datas.append((ow_models, "openwakeword/resources/models"))
-else:
-    print("warning: daemon/models not found; models will be downloaded at runtime (may fail)")
+# Bundle every first-party jarvis submodule except the PyQt6 desktop app, which
+# is not used by the headless daemon and would pull in the entire Qt stack.
+hiddenimports += [
+    m for m in collect_submodules("jarvis")
+    if not m.startswith("jarvis.desktop_app")
+]
 
 a = Analysis(
-    [os.path.join(SRC, "blankslate", "__main__.py")],
-    pathex=[SRC],
+    [ENTRY],
+    pathex=[JARVIS_PARENT],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["PyQt5", "PyQt6", "tkinter", "torch", "kokoro", "misaki", "transformers"],
+    excludes=[
+        "PyQt6", "PyQt6-WebEngine", "PyQt5", "tkinter",
+        "torch", "kokoro", "misaki", "transformers", "chatterbox",
+        "playwright", "flask",
+    ],
     noarchive=False,
 )
 

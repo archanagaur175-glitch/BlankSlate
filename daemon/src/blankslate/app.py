@@ -625,7 +625,7 @@ class DaemonApp:
             ]
 
         try:
-            reply = await self._agent.handle(intent.query, history_turns)
+            reply = await self._agent.handle(query, history_turns)
         except Exception as exc:  # noqa: BLE001
             logger.error("agent turn failed: %s", exc)
             await self._broadcast_state("engine_error", f"Local AI engine error: {exc}")

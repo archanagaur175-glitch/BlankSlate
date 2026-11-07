@@ -86,12 +86,22 @@ connects to an externally running daemon. Build the frozen daemon locally with
 
 ## Licensing
 
-BlankSlate is licensed under the **Apache License 2.0** (see `LICENSE`).
+BlankSlate's original code is licensed under the **Apache License 2.0**
+(see `LICENSE`).
 
-Every third-party dependency and bundled asset is audited for license
+The daemon's agentic core in `daemon/jarvis/` is a **vendored fork of
+[isair/jarvis](https://github.com/isair/jarvis)**, used under the
+**Jarvis AI Assistant License** — a non-commercial license (see
+`daemon/jarvis/LICENSE`). Per that license, the forked code and any derivative
+of it must remain non-commercial; personal, educational, and research use is
+permitted, and the original copyright and permission notice are retained
+unmodified in `daemon/jarvis/LICENSE`.
+
+Consequently, BlankSlate as distributed is intended for **non-commercial,
+personal use**. Commercial use would require a separate license from the
+upstream author (baris@writeme.com).
+
+Every other third-party dependency and bundled asset is audited for license
 compatibility; see `THIRD_PARTY_NOTICES.md` and `scripts/license_audit.py`.
 Copyleft (GPL/AGPL) code is never imported or linked — GPL programs such as
 espeak-ng are only ever invoked as separate, clearly-labeled subprocesses.
-
-The commercial competitor Jarvis.app and the isair/jarvis project are used
-strictly as design references; no code from either is copied into BlankSlate.

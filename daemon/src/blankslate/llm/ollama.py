@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import httpx
 
@@ -74,7 +75,7 @@ class OllamaProvider(LLMProvider):
             raise LLMError(f"ollama returned {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         message = data.get("message") or {}
-        content = message.get("content") or ""
+        content = _strip_thinking(message.get("content") or "")
         tool_calls = [
             LLMToolCall(
                 id=call.get("id") or "",
@@ -100,6 +101,17 @@ class OllamaProvider(LLMProvider):
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove reasoning blocks (qwen3/DeepSeek-style <think>…</think>) so the
+    assistant returns only the final answer to the user."""
+    if not text:
+        return text
+    return _THINK_RE.sub("", text).strip()
 
 
 def _parse_arguments(arguments: object) -> dict:

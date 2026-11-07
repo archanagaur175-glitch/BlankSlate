@@ -85,7 +85,7 @@ class LlmConfig(_Settings):
     base_url: str = "http://127.0.0.1:11434"
     model: str = "qwen3:4b"
     api_key: str = ""
-    timeout_s: float = 60.0
+    timeout_s: float = 600.0
 
 
 @dataclass

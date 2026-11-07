@@ -4,9 +4,9 @@
       "version": "0.1.10",
   "identifier": "dev.blankslate.hud",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -43,7 +43,8 @@
     "shortDescription": "BlankSlate HUD",
     "longDescription": "A private, local-first AI voice assistant overlay.",
     "resources": {
-      "resources/daemon/": "daemon"
+      "resources/daemon/": "daemon",
+      "resources/ollama/": "ollama"
     },
     "windows": {
       "wix": {
